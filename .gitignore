@@ -1,0 +1,29 @@
+# Binaries
+sushiclaw
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Build output
+/dist/
+
+# Test binary
+*.test
+
+# Test cache
+*.out
+
+# Go workspace file
+go.work
+go.work.sum
+
+# Config with secrets (use config.example.json as template)
+~/.picoclaw/config.json
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo

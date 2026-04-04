@@ -1,0 +1,41 @@
+name: PR Checks
+
+on:
+  pull_request:
+  push:
+    branches: ["main"]
+
+jobs:
+  tidy:
+    name: go mod tidy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Clone picoclaw (required by replace directive)
+        run: git clone --depth=1 --branch sushi30 https://github.com/sushi30/picoclaw.git ../picoclaw
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Check go mod tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Clone picoclaw (required by replace directive)
+        run: git clone --depth=1 --branch sushi30 https://github.com/sushi30/picoclaw.git ../picoclaw
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run tests
+        run: go test ./...

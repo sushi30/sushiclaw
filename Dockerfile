@@ -17,7 +17,7 @@ RUN go mod download
 
 # Copy source and build
 COPY . .
-RUN CGO_ENABLED=0 go build -mod=mod -o sushiclaw .
+RUN CGO_ENABLED=0 go build -o sushiclaw .
 
 # ============================================================
 # Stage 2: Minimal runtime image

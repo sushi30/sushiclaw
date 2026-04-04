@@ -67,13 +67,26 @@ to a released version: `go get github.com/sipeed/picoclaw@vX.Y.Z`.
 
 ```bash
 # With replace directive (local fork):
-# Just ensure ../picoclaw is on the right branch.
+# Just ensure ../picoclaw is on the right branch, then:
+make deps    # go mod tidy — always run this after any picoclaw change
+make build
 
 # Without replace directive (upstream release):
 go get github.com/sipeed/picoclaw@latest
 make deps
 make build
 ```
+
+## go.mod hygiene
+
+Always run `make deps` (`go mod tidy`) after:
+- Changing the picoclaw branch or commit
+- Adding or removing imports
+- Bumping any dependency
+
+Commit the updated `go.mod` and `go.sum` together. Never use `-mod=mod` as a
+workaround for a stale go.sum — fix it at the source by running `go mod tidy`
+locally and committing the result. CI enforces this with a `go mod tidy` check.
 
 ## Fork-specific test files
 

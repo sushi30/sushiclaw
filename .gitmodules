@@ -1,0 +1,3 @@
+[submodule "picoclaw"]
+	path = picoclaw
+	url = https://github.com/sipeed/picoclaw.git

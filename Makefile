@@ -1,7 +1,7 @@
 BINARY := sushiclaw
 INSTALL_DIR := $(HOME)/.local/bin
 
-.PHONY: build test install lint fmt vet deps
+.PHONY: build test install lint fmt vet deps sync-picoclaw
 
 build:
 	CGO_ENABLED=0 go build -o $(BINARY) .
@@ -22,4 +22,8 @@ vet:
 	go vet ./...
 
 deps:
+	go mod tidy
+
+sync-picoclaw:
+	git submodule update --remote picoclaw
 	go mod tidy

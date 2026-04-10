@@ -3,16 +3,12 @@
 # ============================================================
 FROM golang:1.25-alpine AS builder
 
-RUN apk add --no-cache git
-
-# Clone the picoclaw sushi30 fork so the go.mod replace directive
-# (replace github.com/sipeed/picoclaw => ../picoclaw) resolves at /picoclaw.
-RUN git clone --depth=1 --branch sushi30 https://github.com/sushi30/picoclaw.git /picoclaw
-
 WORKDIR /src
 
-# Cache dependencies (picoclaw must already exist for the replace directive)
+# Cache go module dependencies
 COPY go.mod go.sum ./
+# Copy picoclaw submodule — resolves the go.mod replace directive (./picoclaw)
+COPY picoclaw/ picoclaw/
 RUN go mod download
 
 # Copy source and build

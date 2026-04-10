@@ -11,9 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Clone picoclaw (required by replace directive)
-        run: git clone --depth=1 --branch sushi30 https://github.com/sushi30/picoclaw.git ../picoclaw
+        with:
+          submodules: recursive
 
       - uses: actions/setup-go@v5
         with:
@@ -29,9 +28,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Clone picoclaw (required by replace directive)
-        run: git clone --depth=1 --branch sushi30 https://github.com/sushi30/picoclaw.git ../picoclaw
+        with:
+          submodules: recursive
 
       - uses: actions/setup-go@v5
         with:

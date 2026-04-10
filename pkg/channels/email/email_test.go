@@ -7,13 +7,12 @@ import (
 	imap "github.com/emersion/go-imap/v2"
 
 	"github.com/sipeed/picoclaw/pkg/bus"
-	"github.com/sipeed/picoclaw/pkg/config"
 )
 
 func TestNewEmailChannel(t *testing.T) {
 	msgBus := bus.NewMessageBus()
 
-	validCfg := config.EmailConfig{
+	validCfg := EmailConfig{
 		SMTPHost: "smtp.example.com",
 		SMTPFrom: "bot@example.com",
 		IMAPHost: "imap.example.com",

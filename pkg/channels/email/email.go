@@ -19,16 +19,35 @@ import (
 	"github.com/sipeed/picoclaw/pkg/logger"
 )
 
+// EmailConfig holds configuration for the email channel.
+// Loaded from the "channels.email" section of the picoclaw config JSON.
+type EmailConfig struct {
+	Enabled            bool                        `json:"enabled"`
+	SMTPHost           string                      `json:"smtp_host"`
+	SMTPPort           int                         `json:"smtp_port"`
+	SMTPFrom           string                      `json:"smtp_from"`
+	SMTPUser           string                      `json:"smtp_user"`
+	SMTPPassword       config.SecureString         `json:"smtp_password"`
+	DefaultSubject     string                      `json:"default_subject"`
+	IMAPHost           string                      `json:"imap_host"`
+	IMAPPort           int                         `json:"imap_port"`
+	IMAPUser           string                      `json:"imap_user"`
+	IMAPPassword       config.SecureString         `json:"imap_password"`
+	PollIntervalSecs   int                         `json:"poll_interval_secs"`
+	AllowFrom          config.FlexibleStringSlice  `json:"allow_from"`
+	ReasoningChannelID string                      `json:"reasoning_channel_id"`
+}
+
 // EmailChannel implements the Channel interface using SMTP (outbound) and IMAP polling (inbound).
 type EmailChannel struct {
 	*channels.BaseChannel
-	config config.EmailConfig
+	config EmailConfig
 	ctx    context.Context
 	cancel context.CancelFunc
 }
 
 // NewEmailChannel creates a new email channel.
-func NewEmailChannel(cfg config.EmailConfig, messageBus *bus.MessageBus) (*EmailChannel, error) {
+func NewEmailChannel(cfg EmailConfig, messageBus *bus.MessageBus) (*EmailChannel, error) {
 	if cfg.SMTPHost == "" {
 		return nil, fmt.Errorf("email smtp_host is required")
 	}

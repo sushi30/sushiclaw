@@ -708,17 +708,6 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 		}
 		respond, cleaned := c.ShouldRespondInGroup(isMentioned, content)
 		if !respond {
-			observePeer := bus.Peer{Kind: "group", ID: compositeChatID}
-			observeMeta := map[string]string{
-				"user_id":    platformID,
-				"username":   user.Username,
-				"first_name": user.FirstName,
-				"is_group":   "true",
-			}
-			c.ObserveGroupMessage(
-				ctx, observePeer, messageIDStr, platformID,
-				compositeChatID, content, mediaPaths, observeMeta, sender,
-			)
 			return nil
 		}
 		content = cleaned

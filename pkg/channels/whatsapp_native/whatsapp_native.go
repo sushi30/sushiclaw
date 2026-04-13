@@ -52,6 +52,7 @@ const (
 type WhatsAppNativeChannel struct {
 	*channels.BaseChannel
 	config       config.WhatsAppConfig
+	voiceConfig  config.VoiceConfig
 	storePath    string
 	client       *whatsmeow.Client
 	container    *sqlstore.Container
@@ -68,12 +69,12 @@ type WhatsAppNativeChannel struct {
 // storePath is the directory for the SQLite session store (e.g. workspace/whatsapp).
 func NewWhatsAppNativeChannel(
 	cfg config.WhatsAppConfig,
+	voiceCfg config.VoiceConfig,
 	bus *bus.MessageBus,
 	storePath string,
 ) (channels.Channel, error) {
 	base := channels.NewBaseChannel("whatsapp_native", cfg, bus, cfg.AllowFrom,
 		channels.WithMaxMessageLength(65536),
-		channels.WithGroupTrigger(cfg.GroupTrigger),
 	)
 	if storePath == "" {
 		storePath = "whatsapp"
@@ -81,6 +82,7 @@ func NewWhatsAppNativeChannel(
 	c := &WhatsAppNativeChannel{
 		BaseChannel: base,
 		config:      cfg,
+		voiceConfig: voiceCfg,
 		storePath:   storePath,
 	}
 	return c, nil
@@ -416,6 +418,9 @@ func (c *WhatsAppNativeChannel) handleIncoming(evt *events.Message) {
 		metadata["peer_kind"] = "direct"
 		metadata["peer_id"] = senderID
 	}
+	if len(mediaPaths) > 0 && c.voiceConfig.EchoTranscription {
+		metadata["echo_transcription"] = "true"
+	}
 
 	peerKind := "direct"
 	if evt.Info.Chat.Server == types.GroupServer {
@@ -435,6 +440,10 @@ func (c *WhatsAppNativeChannel) handleIncoming(evt *events.Message) {
 			"whatsapp",
 			"WhatsApp message blocked (not in allow_from)",
 			map[string]any{"sender_id": senderID},
+		)
+		_, _ = c.Send(
+			c.runCtx,
+			bus.OutboundMessage{Channel: "whatsapp", ChatID: chatID, Content: "You are not authorized to use this bot."},
 		)
 		return
 	}
@@ -468,7 +477,6 @@ func (c *WhatsAppNativeChannel) handleIncoming(evt *events.Message) {
 		}
 		respond, cleaned := c.ShouldRespondInGroup(isMentioned, content)
 		if !respond {
-			c.ObserveGroupMessage(c.runCtx, peer, messageID, senderID, chatID, content, mediaPaths, metadata, sender)
 			return
 		}
 		content = cleaned
@@ -477,9 +485,6 @@ func (c *WhatsAppNativeChannel) handleIncoming(evt *events.Message) {
 	c.HandleMessage(c.runCtx, peer, messageID, senderID, chatID, content, mediaPaths, metadata, sender)
 }
 
-<<<<<<< Updated upstream
-func (c *WhatsAppNativeChannel) Send(ctx context.Context, msg bus.OutboundMessage) ([]string, error) {
-=======
 // mediaFilenameAndMIME returns a safe filename and MIME type for the media
 // contained in msg. It inspects sub-message types in the same order that
 // whatsmeow's DownloadAny does.
@@ -526,8 +531,7 @@ func mediaFilenameAndMIME(msg *waE2E.Message) (filename, mimetype string) {
 	return "media", "application/octet-stream"
 }
 
-func (c *WhatsAppNativeChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
->>>>>>> Stashed changes
+func (c *WhatsAppNativeChannel) Send(ctx context.Context, msg bus.OutboundMessage) ([]string, error) {
 	if !c.IsRunning() {
 		return nil, channels.ErrNotRunning
 	}

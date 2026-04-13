@@ -505,7 +505,7 @@ func (c *TelegramChannel) SendMedia(ctx context.Context, msg bus.OutboundMediaMe
 			tgResult, err = c.bot.SendPhoto(ctx, params)
 			if err != nil && strings.Contains(err.Error(), "PHOTO_INVALID_DIMENSIONS") {
 				if _, seekErr := file.Seek(0, io.SeekStart); seekErr != nil {
-					file.Close()
+					_ = file.Close()
 					return nil, fmt.Errorf("telegram rewind media after photo failure: %w", channels.ErrTemporary)
 				}
 
@@ -559,7 +559,7 @@ func (c *TelegramChannel) SendMedia(ctx context.Context, msg bus.OutboundMediaMe
 		if tgResult != nil {
 			messageIDs = append(messageIDs, strconv.Itoa(tgResult.MessageID))
 		}
-		file.Close()
+		_ = file.Close()
 
 		if err != nil {
 			logger.ErrorCF("telegram", "Failed to send media", map[string]any{
@@ -592,21 +592,24 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 		DisplayName: user.FirstName,
 	}
 
+	chatID := message.Chat.ID
+	chatIDStr := fmt.Sprintf("%d", chatID)
+
 	// check allowlist to avoid downloading attachments for rejected users
 	if !c.IsAllowedSender(sender) {
 		logger.DebugCF("telegram", "Message rejected by allowlist", map[string]any{
 			"user_id": platformID,
 		})
+		_, _ = c.Send(ctx, bus.OutboundMessage{
+			Channel: "telegram", ChatID: chatIDStr, Content: "You are not authorized to use this bot.",
+		})
 		return nil
 	}
 
-	chatID := message.Chat.ID
 	c.chatIDs[platformID] = chatID
 
 	content := ""
 	mediaPaths := []string{}
-
-	chatIDStr := fmt.Sprintf("%d", chatID)
 	messageIDStr := fmt.Sprintf("%d", message.MessageID)
 	scope := channels.BuildMediaScope("telegram", chatIDStr, messageIDStr)
 

@@ -9,7 +9,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/sushi30/sushiclaw/internal/envresolve"
+
 	"github.com/sipeed/picoclaw/pkg/agent"
+	"github.com/sipeed/picoclaw/pkg/audio/asr"
 	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/channels"
 	"github.com/sipeed/picoclaw/pkg/config"
@@ -38,14 +41,15 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 	defer panicFunc()
 
 	if err = logger.EnableFileLogging(filepath.Join(homePath, logPath, logFile)); err != nil {
-		logger.Fatal(fmt.Sprintf("error enabling file logging: %v", err))
+		return fmt.Errorf("error enabling file logging: %w", err)
 	}
 	defer logger.DisableFileLogging()
 
 	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
-		logger.Fatalf("error loading config: %v", err)
+		return fmt.Errorf("error loading config: %w", err)
 	}
+	envresolve.Config(cfg)
 
 	if cfg.Gateway.Port <= 0 || cfg.Gateway.Port > 65535 {
 		return fmt.Errorf("invalid gateway port: %d", cfg.Gateway.Port)
@@ -96,6 +100,11 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 
 	agentLoop.SetChannelManager(cm)
 	agentLoop.SetMediaStore(mediaStore)
+
+	if transcriber := asr.DetectTranscriber(cfg); transcriber != nil {
+		agentLoop.SetTranscriber(transcriber)
+		logger.InfoCF("voice", "Transcription enabled", map[string]any{"provider": transcriber.Name()})
+	}
 
 	enabledChannels := cm.GetEnabledChannels()
 	if len(enabledChannels) > 0 {

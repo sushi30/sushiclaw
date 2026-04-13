@@ -38,13 +38,13 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 	defer panicFunc()
 
 	if err = logger.EnableFileLogging(filepath.Join(homePath, logPath, logFile)); err != nil {
-		logger.Fatal(fmt.Sprintf("error enabling file logging: %v", err))
+		return fmt.Errorf("error enabling file logging: %w", err)
 	}
 	defer logger.DisableFileLogging()
 
 	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
-		logger.Fatalf("error loading config: %v", err)
+		return fmt.Errorf("error loading config: %w", err)
 	}
 
 	if cfg.Gateway.Port <= 0 || cfg.Gateway.Port > 65535 {

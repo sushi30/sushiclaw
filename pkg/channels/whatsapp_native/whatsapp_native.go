@@ -75,7 +75,6 @@ func NewWhatsAppNativeChannel(
 ) (channels.Channel, error) {
 	base := channels.NewBaseChannel("whatsapp_native", cfg, bus, cfg.AllowFrom,
 		channels.WithMaxMessageLength(65536),
-		channels.WithGroupTrigger(cfg.GroupTrigger),
 	)
 	if storePath == "" {
 		storePath = "whatsapp"
@@ -478,7 +477,6 @@ func (c *WhatsAppNativeChannel) handleIncoming(evt *events.Message) {
 		}
 		respond, cleaned := c.ShouldRespondInGroup(isMentioned, content)
 		if !respond {
-			c.ObserveGroupMessage(c.runCtx, peer, messageID, senderID, chatID, content, mediaPaths, metadata, sender)
 			return
 		}
 		content = cleaned

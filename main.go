@@ -19,7 +19,7 @@ import (
 
 func main() {
 	if err := newRootCommand().Execute(); err != nil {
-		fmt.Fprintln(os.Stdout, err)
+		_, _ = fmt.Fprintln(os.Stdout, err)
 		os.Exit(1)
 	}
 }

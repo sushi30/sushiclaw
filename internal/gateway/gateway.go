@@ -9,7 +9,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/sushi30/sushiclaw/internal/envresolve"
+
 	"github.com/sipeed/picoclaw/pkg/agent"
+	"github.com/sipeed/picoclaw/pkg/audio/asr"
 	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/channels"
 	"github.com/sipeed/picoclaw/pkg/config"
@@ -46,6 +49,7 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 	if err != nil {
 		return fmt.Errorf("error loading config: %w", err)
 	}
+	envresolve.Config(cfg)
 
 	if cfg.Gateway.Port <= 0 || cfg.Gateway.Port > 65535 {
 		return fmt.Errorf("invalid gateway port: %d", cfg.Gateway.Port)
@@ -96,6 +100,11 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 
 	agentLoop.SetChannelManager(cm)
 	agentLoop.SetMediaStore(mediaStore)
+
+	if transcriber := asr.DetectTranscriber(cfg); transcriber != nil {
+		agentLoop.SetTranscriber(transcriber)
+		logger.InfoCF("voice", "Transcription enabled", map[string]any{"provider": transcriber.Name()})
+	}
 
 	enabledChannels := cm.GetEnabledChannels()
 	if len(enabledChannels) > 0 {

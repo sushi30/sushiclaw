@@ -137,7 +137,7 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), gracefulShutdownTimeout)
 	defer shutdownCancel()
-	cm.StopAll(shutdownCtx)
+	_ = cm.StopAll(shutdownCtx)
 
 	if cp, ok := provider.(providers.StatefulProvider); ok {
 		cp.Close()

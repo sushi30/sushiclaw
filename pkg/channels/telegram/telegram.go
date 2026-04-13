@@ -505,7 +505,7 @@ func (c *TelegramChannel) SendMedia(ctx context.Context, msg bus.OutboundMediaMe
 			tgResult, err = c.bot.SendPhoto(ctx, params)
 			if err != nil && strings.Contains(err.Error(), "PHOTO_INVALID_DIMENSIONS") {
 				if _, seekErr := file.Seek(0, io.SeekStart); seekErr != nil {
-					file.Close()
+					_ = file.Close()
 					return nil, fmt.Errorf("telegram rewind media after photo failure: %w", channels.ErrTemporary)
 				}
 
@@ -559,7 +559,7 @@ func (c *TelegramChannel) SendMedia(ctx context.Context, msg bus.OutboundMediaMe
 		if tgResult != nil {
 			messageIDs = append(messageIDs, strconv.Itoa(tgResult.MessageID))
 		}
-		file.Close()
+		_ = file.Close()
 
 		if err != nil {
 			logger.ErrorCF("telegram", "Failed to send media", map[string]any{

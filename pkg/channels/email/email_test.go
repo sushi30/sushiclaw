@@ -7,6 +7,7 @@ import (
 	imap "github.com/emersion/go-imap/v2"
 
 	"github.com/sipeed/picoclaw/pkg/bus"
+	"github.com/sipeed/picoclaw/pkg/config"
 )
 
 func TestNewEmailChannel(t *testing.T) {
@@ -14,9 +15,9 @@ func TestNewEmailChannel(t *testing.T) {
 
 	validCfg := EmailConfig{
 		SMTPHost: "smtp.example.com",
-		SMTPFrom: "bot@example.com",
+		SMTPFrom: *config.NewSecureString("bot@example.com"),
 		IMAPHost: "imap.example.com",
-		IMAPUser: "bot@example.com",
+		IMAPUser: *config.NewSecureString("bot@example.com"),
 	}
 
 	t.Run("missing smtp_host", func(t *testing.T) {
@@ -30,7 +31,7 @@ func TestNewEmailChannel(t *testing.T) {
 
 	t.Run("missing smtp_from", func(t *testing.T) {
 		cfg := validCfg
-		cfg.SMTPFrom = ""
+		cfg.SMTPFrom = config.SecureString{}
 		_, err := NewEmailChannel(cfg, msgBus)
 		if err == nil {
 			t.Error("expected error for missing smtp_from, got nil")
@@ -48,7 +49,7 @@ func TestNewEmailChannel(t *testing.T) {
 
 	t.Run("missing imap_user", func(t *testing.T) {
 		cfg := validCfg
-		cfg.IMAPUser = ""
+		cfg.IMAPUser = config.SecureString{}
 		_, err := NewEmailChannel(cfg, msgBus)
 		if err == nil {
 			t.Error("expected error for missing imap_user, got nil")

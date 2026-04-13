@@ -8,6 +8,7 @@ import (
 	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/channels"
 	"github.com/sipeed/picoclaw/pkg/config"
+	"github.com/sushi30/sushiclaw/internal/envresolve"
 )
 
 func init() {
@@ -40,7 +41,13 @@ func loadEmailConfig() (EmailConfig, error) {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return EmailConfig{}, err
 	}
-	return raw.Channels.Email, nil
+	cfg := raw.Channels.Email
+	envresolve.SecureString(&cfg.SMTPFrom)
+	envresolve.SecureString(&cfg.SMTPUser)
+	envresolve.SecureString(&cfg.SMTPPassword)
+	envresolve.SecureString(&cfg.IMAPUser)
+	envresolve.SecureString(&cfg.IMAPPassword)
+	return cfg, nil
 }
 
 func configFilePath() string {

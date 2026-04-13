@@ -20,6 +20,11 @@ func Config(cfg *config.Config) {
 	}
 }
 
+// SecureString resolves a single env://VAR_NAME reference in-place.
+func SecureString(s *config.SecureString) {
+	resolveSecureString(s)
+}
+
 func resolveSecureString(s *config.SecureString) {
 	if s == nil {
 		return

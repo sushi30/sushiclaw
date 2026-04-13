@@ -153,7 +153,7 @@ func (c *EmailChannel) Send(ctx context.Context, msg bus.OutboundMessage) ([]str
 		if err != nil {
 			return nil, fmt.Errorf("smtp new client: %w", channels.ErrTemporary)
 		}
-		defer client.Close()
+		defer func() { _ = client.Close() }()
 		if err := sendViaSMTPClient(client, auth, c.config.SMTPFrom.String(), to, []byte(body)); err != nil {
 			return nil, err
 		}
@@ -232,7 +232,7 @@ func (c *EmailChannel) pollIMAP() {
 		logger.WarnCF("email", "IMAP dial failed", map[string]any{"err": err})
 		return
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	if err = client.Login(c.config.IMAPUser.String(), c.config.IMAPPassword.String()).Wait(); err != nil {
 		logger.WarnCF("email", "IMAP login failed", map[string]any{"err": err})

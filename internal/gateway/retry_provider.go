@@ -6,7 +6,7 @@ import (
 	"github.com/sipeed/picoclaw/pkg/providers"
 )
 
-const retryEmptyPrompt = "Please provide your response to my previous message."
+const retryEmptyPrompt = "Provide your response to my previous message."
 
 type retryEmptyProvider struct {
 	inner providers.LLMProvider

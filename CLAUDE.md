@@ -23,7 +23,7 @@ are consumed directly via `github.com/sipeed/picoclaw` in go.mod, resolved throu
 ## Build Commands
 
 ```bash
-make build           # Build binary
+make build           # Build binary (always use: go build -tags whatsapp_native)
 make test            # Run tests
 make install         # Install to ~/.local/bin
 make lint            # golangci-lint
@@ -90,8 +90,3 @@ Always run `make deps` (`go mod tidy`) after:
 Commit `go.mod`, `go.sum`, and (if picoclaw was updated) the `picoclaw` submodule pointer together.
 Never use `-mod=mod` as a workaround — fix go.sum at the source with `go mod tidy`.
 CI enforces this with a `go mod tidy` check.
-
-## Fork-specific test files
-
-New tests for sushiclaw-specific behaviour go in `*_sushi30_test.go` files within the
-owned packages. This convention makes bespoke additions easy to identify.

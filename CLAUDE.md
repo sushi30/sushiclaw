@@ -56,6 +56,13 @@ picoclaw is a git submodule at `picoclaw/`. The `go.mod` replace directive point
 replace github.com/sipeed/picoclaw => ./picoclaw
 ```
 
+**IMPORTANT: Do not modify files in `picoclaw/` directly.** It is a submodule tracking upstream.
+Changes should be made in sushiclaw-owned packages (e.g., `pkg/channels/email/`, `internal/gateway/`).
+
+To extend picoclaw functionality:
+- Use public APIs exposed by picoclaw packages (e.g., `channels.Manager.RegisterChannel()`)
+- Create wrapper types or extension packages in sushiclaw's `pkg/` or `internal/` directories
+
 To update picoclaw to the latest upstream:
 
 ```bash

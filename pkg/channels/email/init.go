@@ -13,19 +13,14 @@ import (
 
 func init() {
 	channels.RegisterFactory("email", func(cfg *config.Config, b *bus.MessageBus) (channels.Channel, error) {
-		emailCfg, err := loadEmailConfig()
-		if err != nil {
-			return nil, err
-		}
-		if !emailCfg.Enabled {
-			return nil, nil
-		}
-		return NewEmailChannel(emailCfg, b)
+		return nil, nil
 	})
 }
 
-// loadEmailConfig reads the "channels.email" section from the config file.
-// Mirrors gateway.GetConfigPath() priority: SUSHICLAW_CONFIG > PICOCLAW_CONFIG > ~/.picoclaw/config.json
+func LoadEmailConfig() (EmailConfig, error) {
+	return loadEmailConfig()
+}
+
 func loadEmailConfig() (EmailConfig, error) {
 	path := configFilePath()
 	data, err := os.ReadFile(path)

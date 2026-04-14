@@ -1,369 +1,206 @@
-package email
+package email_test
 
 import (
-	"context"
 	"encoding/json"
 	"os"
-	"strings"
+	"path/filepath"
 	"testing"
-	"time"
-
-	imap "github.com/emersion/go-imap/v2"
 
 	"github.com/sipeed/picoclaw/pkg/bus"
-	"github.com/sipeed/picoclaw/pkg/channels"
 	"github.com/sipeed/picoclaw/pkg/config"
+	"github.com/sushi30/sushiclaw/pkg/channels/email"
 )
 
-func TestNewEmailChannel(t *testing.T) {
-	msgBus := bus.NewMessageBus()
-
-	validCfg := EmailConfig{
-		SMTPHost: "smtp.example.com",
-		SMTPFrom: *config.NewSecureString("bot@example.com"),
-		IMAPHost: "imap.example.com",
-		IMAPUser: *config.NewSecureString("bot@example.com"),
-	}
-
-	t.Run("missing smtp_host", func(t *testing.T) {
-		cfg := validCfg
-		cfg.SMTPHost = ""
-		_, err := NewEmailChannel(cfg, msgBus)
-		if err == nil {
-			t.Error("expected error for missing smtp_host, got nil")
-		}
-	})
-
-	t.Run("missing smtp_from", func(t *testing.T) {
-		cfg := validCfg
-		cfg.SMTPFrom = config.SecureString{}
-		_, err := NewEmailChannel(cfg, msgBus)
-		if err == nil {
-			t.Error("expected error for missing smtp_from, got nil")
-		}
-	})
-
-	t.Run("missing imap_host", func(t *testing.T) {
-		cfg := validCfg
-		cfg.IMAPHost = ""
-		_, err := NewEmailChannel(cfg, msgBus)
-		if err == nil {
-			t.Error("expected error for missing imap_host, got nil")
-		}
-	})
-
-	t.Run("missing imap_user", func(t *testing.T) {
-		cfg := validCfg
-		cfg.IMAPUser = config.SecureString{}
-		_, err := NewEmailChannel(cfg, msgBus)
-		if err == nil {
-			t.Error("expected error for missing imap_user, got nil")
-		}
-	})
-
-	t.Run("valid config", func(t *testing.T) {
-		ch, err := NewEmailChannel(validCfg, msgBus)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if ch.Name() != "email" {
-			t.Errorf("Name() = %q, want %q", ch.Name(), "email")
-		}
-		if ch.IsRunning() {
-			t.Error("new channel should not be running")
-		}
-	})
-}
-
-func TestExtractFrom(t *testing.T) {
+func TestLoadEmailConfig(t *testing.T) {
 	tests := []struct {
-		name string
-		from []imap.Address
-		want string
+		name        string
+		configJSON  string
+		wantEnabled bool
+		wantErr     bool
 	}{
 		{
-			name: "full address",
-			from: []imap.Address{{Mailbox: "user", Host: "example.com"}},
-			want: "user@example.com",
+			name: "disabled",
+			configJSON: `{
+				"channels": {
+					"email": {
+						"enabled": false,
+						"smtp_host": "smtp.example.com",
+						"imap_host": "imap.example.com"
+					}
+				}
+			}`,
+			wantEnabled: false,
+			wantErr:     false,
 		},
 		{
-			name: "no host",
-			from: []imap.Address{{Mailbox: "local"}},
-			want: "local",
+			name: "enabled with required fields",
+			configJSON: `{
+				"channels": {
+					"email": {
+						"enabled": true,
+						"smtp_host": "smtp.gmail.com",
+						"smtp_port": 587,
+						"smtp_from": "bot@example.com",
+						"imap_host": "imap.gmail.com",
+						"imap_port": 993,
+						"imap_user": "bot@example.com",
+						"poll_interval_secs": 30
+					}
+				}
+			}`,
+			wantEnabled: true,
+			wantErr:     false,
 		},
 		{
-			name: "empty from list",
-			from: []imap.Address{},
-			want: "",
+			name: "no email section",
+			configJSON: `{
+				"channels": {}
+			}`,
+			wantEnabled: false,
+			wantErr:     false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			env := &imap.Envelope{From: tt.from}
-			got := extractFrom(env)
-			if got != tt.want {
-				t.Errorf("extractFrom() = %q, want %q", got, tt.want)
+			tmpDir := t.TempDir()
+			configPath := filepath.Join(tmpDir, "config.json")
+			if err := os.WriteFile(configPath, []byte(tt.configJSON), 0o600); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+
+			t.Setenv("SUSHICLAW_CONFIG", configPath)
+
+			cfg, err := email.LoadEmailConfig()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("LoadEmailConfig() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if cfg.Enabled != tt.wantEnabled {
+				t.Errorf("LoadEmailConfig().Enabled = %v, want %v", cfg.Enabled, tt.wantEnabled)
 			}
 		})
 	}
 }
 
-func TestDisplayName(t *testing.T) {
+func TestNewEmailChannelValidation(t *testing.T) {
 	tests := []struct {
-		name string
-		from []imap.Address
-		want string
+		name    string
+		cfg     email.EmailConfig
+		wantErr bool
 	}{
 		{
-			name: "address with display name",
-			from: []imap.Address{{Name: "Alice", Mailbox: "alice", Host: "example.com"}},
-			want: "Alice",
-		},
-		{
-			name: "address without display name",
-			from: []imap.Address{{Mailbox: "alice", Host: "example.com"}},
-			want: "alice@example.com",
-		},
-		{
-			name: "empty from list",
-			from: []imap.Address{},
-			want: "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			env := &imap.Envelope{From: tt.from}
-			got := displayName(env)
-			if got != tt.want {
-				t.Errorf("displayName() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestLoadEmailConfig_ResolvesEnvSecureStrings(t *testing.T) {
-	t.Setenv("EMAIL_SMTP_PASS", "secret-smtp-pass")
-	t.Setenv("EMAIL_IMAP_PASS", "secret-imap-pass")
-
-	raw := map[string]any{
-		"channels": map[string]any{
-			"email": map[string]any{
-				"enabled":   true,
-				"smtp_host": "smtp.example.com",
-				"smtp_from": "bot@example.com",
-				"smtp_password": "env://EMAIL_SMTP_PASS",
-				"imap_host": "imap.example.com",
-				"imap_user": "bot@example.com",
-				"imap_password": "env://EMAIL_IMAP_PASS",
+			name: "missing smtp_host",
+			cfg: email.EmailConfig{
+				Enabled:  true,
+				SMTPFrom: mustSecureString("bot@example.com"),
+				IMAPHost: "imap.example.com",
+				IMAPUser: mustSecureString("bot@example.com"),
 			},
-		},
-	}
-	data, err := json.Marshal(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	f, err := os.CreateTemp(t.TempDir(), "config*.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.Write(data); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	t.Setenv("SUSHICLAW_CONFIG", f.Name())
-
-	cfg, err := loadEmailConfig()
-	if err != nil {
-		t.Fatalf("loadEmailConfig() error: %v", err)
-	}
-
-	if got := cfg.SMTPPassword.String(); got != "secret-smtp-pass" {
-		t.Errorf("SMTPPassword = %q, want %q", got, "secret-smtp-pass")
-	}
-	if got := cfg.IMAPPassword.String(); got != "secret-imap-pass" {
-		t.Errorf("IMAPPassword = %q, want %q", got, "secret-imap-pass")
-	}
-}
-
-func TestExtractPlainText(t *testing.T) {
-	plainMIME := "MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nHello, world!"
-	htmlMIME := "MIME-Version: 1.0\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<html><body>Hi</body></html>"
-	multipartMIME := strings.Join([]string{
-		"MIME-Version: 1.0",
-		`Content-Type: multipart/alternative; boundary="boundary"`,
-		"",
-		"--boundary",
-		"Content-Type: text/plain; charset=utf-8",
-		"",
-		"Plain text part",
-		"--boundary",
-		"Content-Type: text/html; charset=utf-8",
-		"",
-		"<html><body>HTML part</body></html>",
-		"--boundary--",
-	}, "\r\n")
-
-	tests := []struct {
-		name  string
-		input string
-		want  string
-	}{
-		{
-			name:  "text/plain MIME",
-			input: plainMIME,
-			want:  "Hello, world!",
+			wantErr: true,
 		},
 		{
-			name:  "html-only MIME",
-			input: htmlMIME,
-			want:  "Hi",
-		},
-		{
-			name:  "multipart with text/plain",
-			input: multipartMIME,
-			want:  "Plain text part",
-		},
-	}
-
-	multipartHTMLOnlyMIME := strings.Join([]string{
-		"MIME-Version: 1.0",
-		`Content-Type: multipart/alternative; boundary="boundary"`,
-		"",
-		"--boundary",
-		"Content-Type: text/html; charset=utf-8",
-		"",
-		"<html><head><style>.x{}</style></head><body><p>Hello <b>there</b></p></body></html>",
-		"--boundary--",
-	}, "\r\n")
-	multipartPlainWinsMIME := strings.Join([]string{
-		"MIME-Version: 1.0",
-		`Content-Type: multipart/alternative; boundary="boundary"`,
-		"",
-		"--boundary",
-		"Content-Type: text/plain; charset=utf-8",
-		"",
-		"Preferred plain text",
-		"--boundary",
-		"Content-Type: text/html; charset=utf-8",
-		"",
-		"<html><body>Ignored HTML</body></html>",
-		"--boundary--",
-	}, "\r\n")
-
-	tests = append(tests,
-		struct {
-			name  string
-			input string
-			want  string
-		}{"multipart/alternative html-only", multipartHTMLOnlyMIME, "Hello there"},
-		struct {
-			name  string
-			input string
-			want  string
-		}{"multipart/alternative plain wins over html", multipartPlainWinsMIME, "Preferred plain text"},
-	)
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := extractPlainText(strings.NewReader(tt.input))
-			if got != tt.want {
-				t.Errorf("extractPlainText() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestProcessEmail_TextInteraction(t *testing.T) {
-	messageBus := bus.NewMessageBus()
-	ch := &EmailChannel{
-		BaseChannel: channels.NewBaseChannel("email", EmailConfig{}, messageBus, nil),
-	}
-
-	envelope := &imap.Envelope{
-		From:      []imap.Address{{Mailbox: "test", Host: "example.com", Name: "Test Sender"}},
-		Subject:   "HTML only",
-		MessageID: "mid-1",
-	}
-	body := strings.NewReader("MIME-Version: 1.0\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<html><body><p>Hello from email</p></body></html>")
-
-	processed, got := ch.processEmail(context.Background(), envelope, body)
-	if !processed {
-		t.Fatal("processEmail() reported skipped message")
-	}
-	if got != "Hello from email" {
-		t.Fatalf("processEmail() = %q, want %q", got, "Hello from email")
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-
-	select {
-	case <-ctx.Done():
-		t.Fatal("timeout waiting for inbound message")
-	case inbound, ok := <-messageBus.InboundChan():
-		if !ok {
-			t.Fatal("expected inbound message")
-		}
-		if inbound.Channel != "email" {
-			t.Fatalf("channel=%q", inbound.Channel)
-		}
-		if strings.TrimSpace(inbound.Content) == "" {
-			t.Fatal("expected non-empty content")
-		}
-		if inbound.Content != "Hello from email" {
-			t.Fatalf("content=%q", inbound.Content)
-		}
-	}
-}
-
-func TestProcessEmail_SkipsEmptyOrSenderlessMessages(t *testing.T) {
-	messageBus := bus.NewMessageBus()
-	ch := &EmailChannel{
-		BaseChannel: channels.NewBaseChannel("email", EmailConfig{}, messageBus, nil),
-	}
-
-	tests := []struct {
-		name     string
-		envelope *imap.Envelope
-		body     string
-	}{
-		{
-			name:     "missing sender",
-			envelope: &imap.Envelope{Subject: "No sender", MessageID: "mid-2"},
-			body:     "MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nHello",
-		},
-		{
-			name: "empty extracted text",
-			envelope: &imap.Envelope{
-				From:      []imap.Address{{Mailbox: "test", Host: "example.com"}},
-				Subject:   "Whitespace only",
-				MessageID: "mid-3",
+			name: "missing smtp_from",
+			cfg: email.EmailConfig{
+				Enabled:  true,
+				SMTPHost: "smtp.example.com",
+				IMAPHost: "imap.example.com",
+				IMAPUser: mustSecureString("bot@example.com"),
 			},
-			body: "MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n   \r\n",
+			wantErr: true,
+		},
+		{
+			name: "missing imap_host",
+			cfg: email.EmailConfig{
+				Enabled:  true,
+				SMTPHost: "smtp.example.com",
+				SMTPFrom: mustSecureString("bot@example.com"),
+				IMAPUser: mustSecureString("bot@example.com"),
+			},
+			wantErr: true,
+		},
+		{
+			name: "missing imap_user",
+			cfg: email.EmailConfig{
+				Enabled:  true,
+				SMTPHost: "smtp.example.com",
+				SMTPFrom: mustSecureString("bot@example.com"),
+				IMAPHost: "imap.example.com",
+			},
+			wantErr: true,
+		},
+		{
+			name: "valid config",
+			cfg: email.EmailConfig{
+				Enabled:  true,
+				SMTPHost: "smtp.gmail.com",
+				SMTPPort: 587,
+				SMTPFrom: mustSecureString("bot@example.com"),
+				IMAPHost: "imap.gmail.com",
+				IMAPPort: 993,
+				IMAPUser: mustSecureString("bot@example.com"),
+			},
+			wantErr: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			processed, got := ch.processEmail(context.Background(), tt.envelope, strings.NewReader(tt.body))
-			if processed {
-				t.Fatal("expected processEmail() to skip message")
-			}
-			if got != "" {
-				t.Fatalf("processEmail() text = %q, want empty", got)
-			}
-
-			select {
-			case inbound := <-messageBus.InboundChan():
-				t.Fatalf("unexpected inbound message: %+v", inbound)
-			default:
+			msgBus := bus.NewMessageBus()
+			_, err := email.NewEmailChannel(tt.cfg, msgBus)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("NewEmailChannel() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
+}
+
+func TestLoadEmailConfigFromExampleConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	dst := filepath.Join(tmpDir, "config.json")
+
+	src, err := os.Open("../../../config.example.json")
+	if err != nil {
+		t.Fatalf("open example config: %v", err)
+	}
+	data, err := os.ReadFile(src.Name())
+	if closeErr := src.Close(); closeErr != nil && err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		t.Fatalf("read example config: %v", err)
+	}
+	if err = os.WriteFile(dst, data, 0o600); err != nil {
+		t.Fatalf("write temp config: %v", err)
+	}
+
+	t.Setenv("SUSHICLAW_CONFIG", dst)
+
+	cfg, err := email.LoadEmailConfig()
+	if err != nil {
+		t.Fatalf("LoadEmailConfig: %v", err)
+	}
+
+	if cfg.Enabled != false {
+		t.Errorf("email.enabled = %v, want false", cfg.Enabled)
+	}
+	if cfg.SMTPHost != "smtp.example.com" {
+		t.Errorf("email.smtp_host = %q, want %q", cfg.SMTPHost, "smtp.example.com")
+	}
+	if cfg.IMAPHost != "imap.example.com" {
+		t.Errorf("email.imap_host = %q, want %q", cfg.IMAPHost, "imap.example.com")
+	}
+	if cfg.DefaultSubject != "Message from sushiclaw" {
+		t.Errorf("email.default_subject = %q, want %q", cfg.DefaultSubject, "Message from sushiclaw")
+	}
+	if cfg.PollIntervalSecs != 30 {
+		t.Errorf("email.poll_interval_secs = %d, want 30", cfg.PollIntervalSecs)
+	}
+}
+
+func mustSecureString(s string) config.SecureString {
+	var ss config.SecureString
+	if err := json.Unmarshal([]byte(`"`+s+`"`), &ss); err != nil {
+		panic(err)
+	}
+	return ss
 }

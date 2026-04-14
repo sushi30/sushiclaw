@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sushi30/sushiclaw/internal/envresolve"
+	"github.com/sushi30/sushiclaw/pkg/channels/email"
 
 	"github.com/sipeed/picoclaw/pkg/agent"
 	"github.com/sipeed/picoclaw/pkg/audio/asr"
@@ -96,6 +97,16 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 	cm, err := channels.NewManager(cfg, msgBus, mediaStore)
 	if err != nil {
 		return fmt.Errorf("error creating channel manager: %w", err)
+	}
+
+	if emailCfg, err := email.LoadEmailConfig(); err != nil {
+		return fmt.Errorf("error loading email config: %w", err)
+	} else if emailCfg.Enabled {
+		emailCh, err := email.NewEmailChannel(emailCfg, msgBus)
+		if err != nil {
+			return fmt.Errorf("error creating email channel: %w", err)
+		}
+		cm.RegisterChannel("email", emailCh)
 	}
 
 	agentLoop.SetChannelManager(cm)

@@ -13,7 +13,7 @@ RUN go mod download
 
 # Copy source and build
 COPY . .
-RUN CGO_ENABLED=0 go build -o sushiclaw .
+RUN CGO_ENABLED=0 go build -tags whatsapp_native -o sushiclaw .
 
 # ============================================================
 # Stage 2: Minimal runtime image

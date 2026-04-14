@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/proto/waWeb"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
@@ -27,6 +28,7 @@ func makeTestChannel(store media.MediaStore) (*WhatsAppNativeChannel, *bus.Messa
 	ch := &WhatsAppNativeChannel{
 		BaseChannel: bc,
 		runCtx:      context.Background(),
+		startTime:   time.Now(),
 	}
 	return ch, mb
 }
@@ -57,8 +59,9 @@ func TestHandleIncoming_ImageWithCaption_UsesCaption(t *testing.T) {
 				Sender: types.NewJID("1001", types.DefaultUserServer),
 				Chat:   types.NewJID("1001", types.DefaultUserServer),
 			},
-			ID:       "mid-img",
-			PushName: "Bob",
+			ID:        "mid-img",
+			PushName:  "Bob",
+			Timestamp: time.Now().Add(1 * time.Second),
 		},
 		Message: &waE2E.Message{
 			ImageMessage: &waE2E.ImageMessage{
@@ -91,8 +94,9 @@ func TestHandleIncoming_MediaOnly_Dropped_WithoutStoreAndNoCaption(t *testing.T)
 				Sender: types.NewJID("1001", types.DefaultUserServer),
 				Chat:   types.NewJID("1001", types.DefaultUserServer),
 			},
-			ID:       "mid-notext",
-			PushName: "Carol",
+			ID:        "mid-notext",
+			PushName:  "Carol",
+			Timestamp: time.Now().Add(1 * time.Second),
 		},
 		Message: &waE2E.Message{
 			ImageMessage: &waE2E.ImageMessage{
@@ -111,5 +115,117 @@ func TestHandleIncoming_MediaOnly_Dropped_WithoutStoreAndNoCaption(t *testing.T)
 		// correct: message was dropped because no content and no media refs
 	case <-mb.InboundChan():
 		t.Fatal("expected message to be dropped, but it was forwarded")
+	}
+}
+
+// TestHandleIncoming_IsFromMe_Skipped verifies that messages sent by the bot
+// itself (IsFromMe=true) are skipped to prevent echo loops on reconnect.
+func TestHandleIncoming_IsFromMe_Skipped(t *testing.T) {
+	ch, mb := makeTestChannel(nil)
+
+	evt := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				IsFromMe: true,
+				Sender:   types.NewJID("1001", types.DefaultUserServer),
+				Chat:     types.NewJID("1001", types.DefaultUserServer),
+			},
+			ID: "mid-self",
+		},
+		Message: &waE2E.Message{
+			Conversation: proto.String("self message"),
+		},
+	}
+
+	ch.handleIncoming(evt)
+
+	assertNoMessage(t, mb, "expected IsFromMe message to be skipped")
+}
+
+// TestHandleIncoming_SourceWebMsg_Skipped verifies that history-sync messages
+// (SourceWebMsg != nil) are skipped to prevent reprocessing on reconnect.
+func TestHandleIncoming_SourceWebMsg_Skipped(t *testing.T) {
+	ch, mb := makeTestChannel(nil)
+
+	evt := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Sender: types.NewJID("1001", types.DefaultUserServer),
+				Chat:   types.NewJID("1001", types.DefaultUserServer),
+			},
+			ID: "mid-history",
+		},
+		SourceWebMsg: &waWeb.WebMessageInfo{},
+		Message: &waE2E.Message{
+			Conversation: proto.String("history sync message"),
+		},
+	}
+
+	ch.handleIncoming(evt)
+
+	assertNoMessage(t, mb, "expected history-sync message to be skipped")
+}
+
+// TestHandleIncoming_StaleTimestamp_Skipped verifies that messages with
+// timestamps older than the channel start time are skipped.
+func TestHandleIncoming_StaleTimestamp_Skipped(t *testing.T) {
+	ch, mb := makeTestChannel(nil)
+
+	evt := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Sender: types.NewJID("1001", types.DefaultUserServer),
+				Chat:   types.NewJID("1001", types.DefaultUserServer),
+			},
+			ID:        "mid-stale",
+			Timestamp: time.Now().Add(-1 * time.Hour),
+		},
+		Message: &waE2E.Message{
+			Conversation: proto.String("stale message"),
+		},
+	}
+
+	ch.handleIncoming(evt)
+
+	assertNoMessage(t, mb, "expected stale message to be skipped")
+}
+
+// TestHandleIncoming_RecentMessage_Processed verifies that a valid recent
+// message passes all guards and is processed normally.
+func TestHandleIncoming_RecentMessage_Processed(t *testing.T) {
+	ch, mb := makeTestChannel(nil)
+
+	content := "hello world"
+	evt := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Sender: types.NewJID("1001", types.DefaultUserServer),
+				Chat:   types.NewJID("1001", types.DefaultUserServer),
+			},
+			ID:        "mid-recent",
+			Timestamp: time.Now().Add(1 * time.Second),
+		},
+		Message: &waE2E.Message{
+			Conversation: proto.String(content),
+		},
+	}
+
+	ch.handleIncoming(evt)
+
+	msg := receiveInbound(t, mb)
+	if msg.Content != content {
+		t.Fatalf("expected content=%q, got %q", content, msg.Content)
+	}
+}
+
+func assertNoMessage(t *testing.T, mb *bus.MessageBus, msg string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	select {
+	case <-ctx.Done():
+		// correct: no message was forwarded
+	case <-mb.InboundChan():
+		t.Fatal(msg)
 	}
 }

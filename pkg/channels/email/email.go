@@ -1,6 +1,7 @@
 package email
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	imap "github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
 	gomail "github.com/emersion/go-message/mail"
+	"golang.org/x/net/html"
 
 	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/channels"
@@ -295,28 +297,10 @@ func (c *EmailChannel) pollIMAP() {
 		if envelope == nil || bodySectionData == nil {
 			continue
 		}
-
-		fromAddr := extractFrom(envelope)
-		if fromAddr == "" {
+		processed, _ := c.processEmail(c.ctx, envelope, bodySectionData.Literal)
+		if !processed {
 			continue
 		}
-
-		messageID := envelope.MessageID
-		plainText := extractPlainText(bodySectionData.Literal)
-
-		sender := bus.SenderInfo{
-			Platform:    "email",
-			PlatformID:  fromAddr,
-			CanonicalID: "email:" + fromAddr,
-			DisplayName: displayName(envelope),
-		}
-
-		c.HandleMessage(c.ctx,
-			bus.Peer{Kind: "direct", ID: fromAddr},
-			messageID, fromAddr, fromAddr, plainText,
-			nil, nil,
-			sender,
-		)
 
 		// Mark message as \Seen
 		storeSeq := imap.SeqSetNum(seqNum)
@@ -333,6 +317,39 @@ func (c *EmailChannel) pollIMAP() {
 	if err := fetchCmd.Close(); err != nil {
 		logger.WarnCF("email", "IMAP FETCH close error", map[string]any{"err": err})
 	}
+}
+
+func (c *EmailChannel) processEmail(ctx context.Context, envelope *imap.Envelope, bodyLiteral io.Reader) (bool, string) {
+	fromAddr := extractFrom(envelope)
+	if fromAddr == "" {
+		return false, ""
+	}
+
+	plainText := extractPlainText(bodyLiteral)
+	if strings.TrimSpace(plainText) == "" {
+		return false, ""
+	}
+
+	logger.DebugCF("email", "Email received", map[string]any{
+		"from":    fromAddr,
+		"subject": envelope.Subject,
+	})
+
+	sender := bus.SenderInfo{
+		Platform:    "email",
+		PlatformID:  fromAddr,
+		CanonicalID: "email:" + fromAddr,
+		DisplayName: displayName(envelope),
+	}
+
+	c.HandleMessage(ctx,
+		bus.Peer{Kind: "direct", ID: fromAddr},
+		envelope.MessageID, fromAddr, fromAddr, plainText,
+		nil, nil,
+		sender,
+	)
+
+	return true, plainText
 }
 
 func extractFrom(env *imap.Envelope) string {
@@ -357,14 +374,20 @@ func displayName(env *imap.Envelope) string {
 }
 
 // extractPlainText reads the message body and returns the first text/plain part.
+// If only HTML is available, it extracts visible text from text/html instead.
 // Falls back to the raw body if parsing fails.
 func extractPlainText(r io.Reader) string {
-	mr, err := gomail.CreateReader(r)
+	raw, err := io.ReadAll(r)
 	if err != nil {
-		// Fallback: read raw bytes
-		b, _ := io.ReadAll(r)
-		return strings.TrimSpace(string(b))
+		return ""
 	}
+
+	mr, err := gomail.CreateReader(bytes.NewReader(raw))
+	if err != nil {
+		return strings.TrimSpace(string(raw))
+	}
+
+	var htmlFallback string
 
 	for {
 		p, err := mr.NextPart()
@@ -385,7 +408,50 @@ func extractPlainText(r io.Reader) string {
 			if text != "" {
 				return text
 			}
+			continue
+		}
+		if ct == "text/html" && htmlFallback == "" {
+			b, _ := io.ReadAll(p.Body)
+			htmlFallback = stripHTMLText(string(b))
 		}
 	}
+
+	if htmlFallback != "" {
+		return htmlFallback
+	}
+
 	return ""
+}
+
+func stripHTMLText(src string) string {
+	doc, err := html.Parse(strings.NewReader(src))
+	if err != nil {
+		return strings.TrimSpace(src)
+	}
+
+	var b strings.Builder
+	var walk func(*html.Node, bool)
+	walk = func(n *html.Node, hidden bool) {
+		if n == nil {
+			return
+		}
+		if n.Type == html.ElementNode {
+			switch n.Data {
+			case "script", "style", "head":
+				hidden = true
+			case "br", "p", "div", "li", "tr", "td", "th":
+				b.WriteByte(' ')
+			}
+		}
+		if n.Type == html.TextNode && !hidden {
+			b.WriteString(n.Data)
+			b.WriteByte(' ')
+		}
+		for child := n.FirstChild; child != nil; child = child.NextSibling {
+			walk(child, hidden)
+		}
+	}
+	walk(doc, false)
+
+	return strings.Join(strings.Fields(b.String()), " ")
 }

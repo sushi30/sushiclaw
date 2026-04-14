@@ -1,14 +1,17 @@
 package email
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	imap "github.com/emersion/go-imap/v2"
 
 	"github.com/sipeed/picoclaw/pkg/bus"
+	"github.com/sipeed/picoclaw/pkg/channels"
 	"github.com/sipeed/picoclaw/pkg/config"
 )
 
@@ -219,7 +222,7 @@ func TestExtractPlainText(t *testing.T) {
 		{
 			name:  "html-only MIME",
 			input: htmlMIME,
-			want:  "",
+			want:  "Hi",
 		},
 		{
 			name:  "multipart with text/plain",
@@ -228,11 +231,138 @@ func TestExtractPlainText(t *testing.T) {
 		},
 	}
 
+	multipartHTMLOnlyMIME := strings.Join([]string{
+		"MIME-Version: 1.0",
+		`Content-Type: multipart/alternative; boundary="boundary"`,
+		"",
+		"--boundary",
+		"Content-Type: text/html; charset=utf-8",
+		"",
+		"<html><head><style>.x{}</style></head><body><p>Hello <b>there</b></p></body></html>",
+		"--boundary--",
+	}, "\r\n")
+	multipartPlainWinsMIME := strings.Join([]string{
+		"MIME-Version: 1.0",
+		`Content-Type: multipart/alternative; boundary="boundary"`,
+		"",
+		"--boundary",
+		"Content-Type: text/plain; charset=utf-8",
+		"",
+		"Preferred plain text",
+		"--boundary",
+		"Content-Type: text/html; charset=utf-8",
+		"",
+		"<html><body>Ignored HTML</body></html>",
+		"--boundary--",
+	}, "\r\n")
+
+	tests = append(tests,
+		struct {
+			name  string
+			input string
+			want  string
+		}{"multipart/alternative html-only", multipartHTMLOnlyMIME, "Hello there"},
+		struct {
+			name  string
+			input string
+			want  string
+		}{"multipart/alternative plain wins over html", multipartPlainWinsMIME, "Preferred plain text"},
+	)
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := extractPlainText(strings.NewReader(tt.input))
 			if got != tt.want {
 				t.Errorf("extractPlainText() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestProcessEmail_TextInteraction(t *testing.T) {
+	messageBus := bus.NewMessageBus()
+	ch := &EmailChannel{
+		BaseChannel: channels.NewBaseChannel("email", EmailConfig{}, messageBus, nil),
+	}
+
+	envelope := &imap.Envelope{
+		From:      []imap.Address{{Mailbox: "test", Host: "example.com", Name: "Test Sender"}},
+		Subject:   "HTML only",
+		MessageID: "mid-1",
+	}
+	body := strings.NewReader("MIME-Version: 1.0\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<html><body><p>Hello from email</p></body></html>")
+
+	processed, got := ch.processEmail(context.Background(), envelope, body)
+	if !processed {
+		t.Fatal("processEmail() reported skipped message")
+	}
+	if got != "Hello from email" {
+		t.Fatalf("processEmail() = %q, want %q", got, "Hello from email")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	select {
+	case <-ctx.Done():
+		t.Fatal("timeout waiting for inbound message")
+	case inbound, ok := <-messageBus.InboundChan():
+		if !ok {
+			t.Fatal("expected inbound message")
+		}
+		if inbound.Channel != "email" {
+			t.Fatalf("channel=%q", inbound.Channel)
+		}
+		if strings.TrimSpace(inbound.Content) == "" {
+			t.Fatal("expected non-empty content")
+		}
+		if inbound.Content != "Hello from email" {
+			t.Fatalf("content=%q", inbound.Content)
+		}
+	}
+}
+
+func TestProcessEmail_SkipsEmptyOrSenderlessMessages(t *testing.T) {
+	messageBus := bus.NewMessageBus()
+	ch := &EmailChannel{
+		BaseChannel: channels.NewBaseChannel("email", EmailConfig{}, messageBus, nil),
+	}
+
+	tests := []struct {
+		name     string
+		envelope *imap.Envelope
+		body     string
+	}{
+		{
+			name:     "missing sender",
+			envelope: &imap.Envelope{Subject: "No sender", MessageID: "mid-2"},
+			body:     "MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nHello",
+		},
+		{
+			name: "empty extracted text",
+			envelope: &imap.Envelope{
+				From:      []imap.Address{{Mailbox: "test", Host: "example.com"}},
+				Subject:   "Whitespace only",
+				MessageID: "mid-3",
+			},
+			body: "MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n   \r\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			processed, got := ch.processEmail(context.Background(), tt.envelope, strings.NewReader(tt.body))
+			if processed {
+				t.Fatal("expected processEmail() to skip message")
+			}
+			if got != "" {
+				t.Fatalf("processEmail() text = %q, want empty", got)
+			}
+
+			select {
+			case inbound := <-messageBus.InboundChan():
+				t.Fatalf("unexpected inbound message: %+v", inbound)
+			default:
 			}
 		})
 	}

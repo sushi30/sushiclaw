@@ -78,6 +78,8 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 		cfg.Agents.Defaults.ModelName = modelID
 	}
 
+	provider = wrapWithRetryEmpty(provider)
+
 	msgBus := bus.NewMessageBus()
 	agentLoop := agent.NewAgentLoop(cfg, msgBus, provider)
 

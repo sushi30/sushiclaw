@@ -7,7 +7,7 @@ build:
 	CGO_ENABLED=0 go build -tags whatsapp_native -o $(BINARY) .
 
 test:
-	go test ./...
+	go test -tags whatsapp_native ./...
 
 install: build
 	cp $(BINARY) $(INSTALL_DIR)/$(BINARY)

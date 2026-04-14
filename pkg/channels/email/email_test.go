@@ -1,6 +1,8 @@
 package email
 
 import (
+	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -135,6 +137,54 @@ func TestDisplayName(t *testing.T) {
 				t.Errorf("displayName() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestLoadEmailConfig_ResolvesEnvSecureStrings(t *testing.T) {
+	t.Setenv("EMAIL_SMTP_PASS", "secret-smtp-pass")
+	t.Setenv("EMAIL_IMAP_PASS", "secret-imap-pass")
+
+	raw := map[string]any{
+		"channels": map[string]any{
+			"email": map[string]any{
+				"enabled":   true,
+				"smtp_host": "smtp.example.com",
+				"smtp_from": "bot@example.com",
+				"smtp_password": "env://EMAIL_SMTP_PASS",
+				"imap_host": "imap.example.com",
+				"imap_user": "bot@example.com",
+				"imap_password": "env://EMAIL_IMAP_PASS",
+			},
+		},
+	}
+	data, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	f, err := os.CreateTemp(t.TempDir(), "config*.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Write(data); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("SUSHICLAW_CONFIG", f.Name())
+
+	cfg, err := loadEmailConfig()
+	if err != nil {
+		t.Fatalf("loadEmailConfig() error: %v", err)
+	}
+
+	if got := cfg.SMTPPassword.String(); got != "secret-smtp-pass" {
+		t.Errorf("SMTPPassword = %q, want %q", got, "secret-smtp-pass")
+	}
+	if got := cfg.IMAPPassword.String(); got != "secret-imap-pass" {
+		t.Errorf("IMAPPassword = %q, want %q", got, "secret-imap-pass")
 	}
 }
 

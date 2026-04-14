@@ -1,5 +1,3 @@
-//go:build whatsapp_native
-
 package whatsapp
 
 import (
@@ -17,22 +15,6 @@ import (
 	"github.com/sipeed/picoclaw/pkg/config"
 	"github.com/sipeed/picoclaw/pkg/media"
 )
-
-// noopMediaStore is a MediaStore that records Store calls without touching the filesystem.
-type noopMediaStore struct {
-	stored []string // local paths passed to Store
-}
-
-func (s *noopMediaStore) Store(localPath string, _ media.MediaMeta, _ string) (string, error) {
-	s.stored = append(s.stored, localPath)
-	return "media://noop-" + localPath, nil
-}
-
-func (s *noopMediaStore) Resolve(ref string) (string, error)                      { return ref, nil }
-func (s *noopMediaStore) ResolveWithMeta(ref string) (string, media.MediaMeta, error) {
-	return ref, media.MediaMeta{}, nil
-}
-func (s *noopMediaStore) ReleaseAll(_ string) error { return nil }
 
 // makeTestChannel creates a WhatsAppNativeChannel with no real whatsmeow client
 // (client stays nil, so DownloadAny is never called — suitable for text/caption tests).

@@ -7,25 +7,25 @@ import (
 
 	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/channels"
-	"github.com/sipeed/picoclaw/pkg/config"
 	"github.com/sushi30/sushiclaw/internal/envresolve"
 )
 
-func init() {
-	channels.RegisterFactory("email", func(cfg *config.Config, b *bus.MessageBus) (channels.Channel, error) {
-		emailCfg, err := loadEmailConfig()
-		if err != nil {
-			return nil, err
-		}
-		if !emailCfg.Enabled {
-			return nil, nil
-		}
-		return NewEmailChannel(emailCfg, b)
-	})
+// InitChannel loads email config, resolves env vars, and returns an initialized
+// EmailChannel. Returns (nil, nil) if email is disabled in config.
+// Returns an error if email is enabled but a required env var is unset.
+func InitChannel(b *bus.MessageBus) (channels.Channel, error) {
+	emailCfg, err := loadEmailConfig()
+	if err != nil {
+		return nil, err
+	}
+	if !emailCfg.Enabled {
+		return nil, nil
+	}
+	return NewEmailChannel(emailCfg, b)
 }
 
-// loadEmailConfig reads the "channels.email" section from the config file.
-// Mirrors gateway.GetConfigPath() priority: SUSHICLAW_CONFIG > PICOCLAW_CONFIG > ~/.picoclaw/config.json
+// loadEmailConfig reads the "channels.email" section from the config file and
+// resolves env:// references. Required fields return an error if unresolved.
 func loadEmailConfig() (EmailConfig, error) {
 	path := configFilePath()
 	data, err := os.ReadFile(path)
@@ -42,11 +42,25 @@ func loadEmailConfig() (EmailConfig, error) {
 		return EmailConfig{}, err
 	}
 	cfg := raw.Channels.Email
-	envresolve.SecureString(&cfg.SMTPFrom)
+	if !cfg.Enabled {
+		return cfg, nil
+	}
+
+	// Optional fields — resolve silently, leave unresolved if env var missing.
 	envresolve.SecureString(&cfg.SMTPUser)
 	envresolve.SecureString(&cfg.SMTPPassword)
-	envresolve.SecureString(&cfg.IMAPUser)
-	envresolve.SecureString(&cfg.IMAPPassword)
+
+	// Required fields — return an error if the env var is not set.
+	if err := envresolve.SecureStringRequired(&cfg.SMTPFrom); err != nil {
+		return EmailConfig{}, err
+	}
+	if err := envresolve.SecureStringRequired(&cfg.IMAPUser); err != nil {
+		return EmailConfig{}, err
+	}
+	if err := envresolve.SecureStringRequired(&cfg.IMAPPassword); err != nil {
+		return EmailConfig{}, err
+	}
+
 	return cfg, nil
 }
 
@@ -68,3 +82,4 @@ func configFilePath() string {
 	}
 	return filepath.Join(home, "config.json")
 }
+

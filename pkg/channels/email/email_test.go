@@ -191,6 +191,67 @@ func TestLoadEmailConfig_ResolvesEnvSecureStrings(t *testing.T) {
 	}
 }
 
+func writeConfigFile(t *testing.T, raw map[string]any) string {
+	t.Helper()
+	data, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.CreateTemp(t.TempDir(), "config*.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Write(data); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return f.Name()
+}
+
+func TestInitChannel_Disabled_ReturnsNil(t *testing.T) {
+	raw := map[string]any{
+		"channels": map[string]any{
+			"email": map[string]any{"enabled": false},
+		},
+	}
+	t.Setenv("SUSHICLAW_CONFIG", writeConfigFile(t, raw))
+
+	ch, err := InitChannel(bus.NewMessageBus())
+	if err != nil {
+		t.Fatalf("InitChannel() error = %v, want nil", err)
+	}
+	if ch != nil {
+		t.Errorf("InitChannel() = %v, want nil for disabled channel", ch)
+	}
+}
+
+func TestInitChannel_MissingRequiredEnvVar_ReturnsError(t *testing.T) {
+	_ = os.Unsetenv("MISSING_IMAP_USER")
+	raw := map[string]any{
+		"channels": map[string]any{
+			"email": map[string]any{
+				"enabled":       true,
+				"smtp_host":     "smtp.example.com",
+				"smtp_from":     "bot@example.com",
+				"imap_host":     "imap.example.com",
+				"imap_user":     "env://MISSING_IMAP_USER",
+				"imap_password": "env://MISSING_IMAP_USER",
+			},
+		},
+	}
+	t.Setenv("SUSHICLAW_CONFIG", writeConfigFile(t, raw))
+
+	_, err := InitChannel(bus.NewMessageBus())
+	if err == nil {
+		t.Fatal("InitChannel() = nil error, want error for missing env var")
+	}
+	if !strings.Contains(err.Error(), "MISSING_IMAP_USER") {
+		t.Errorf("error %q does not mention var name", err.Error())
+	}
+}
+
 func TestExtractPlainText(t *testing.T) {
 	plainMIME := "MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nHello, world!"
 	htmlMIME := "MIME-Version: 1.0\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<html><body>Hi</body></html>"

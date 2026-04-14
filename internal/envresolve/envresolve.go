@@ -5,6 +5,7 @@
 package envresolve
 
 import (
+	"fmt"
 	"os"
 	"strings"
 
@@ -23,6 +24,16 @@ func Config(cfg *config.Config) {
 // SecureString resolves a single env://VAR_NAME reference in-place.
 func SecureString(s *config.SecureString) {
 	resolveSecureString(s)
+}
+
+// SecureStringRequired resolves a single env://VAR_NAME reference in-place and
+// returns an error if the referenced environment variable is not set.
+func SecureStringRequired(s *config.SecureString) error {
+	resolveSecureString(s)
+	if varName, ok := strings.CutPrefix(s.String(), "env://"); ok {
+		return fmt.Errorf("env var %s is not set", varName)
+	}
+	return nil
 }
 
 func resolveSecureString(s *config.SecureString) {

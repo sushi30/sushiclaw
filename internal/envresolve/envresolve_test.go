@@ -2,6 +2,7 @@ package envresolve_test
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/sipeed/picoclaw/pkg/audio/asr"
@@ -57,6 +58,35 @@ func TestConfig_MissingEnvVar_LeavesUnchanged(t *testing.T) {
 	got := cfg.ModelList[0].APIKey()
 	if got != "env://MISSING_VAR" {
 		t.Errorf("APIKey() = %q, want %q (unresolved)", got, "env://MISSING_VAR")
+	}
+}
+
+func TestSecureStringRequired_MissingVar_ReturnsError(t *testing.T) {
+	_ = os.Unsetenv("REQUIRED_MISSING")
+
+	var s config.SecureString
+	s.Set("env://REQUIRED_MISSING")
+
+	err := envresolve.SecureStringRequired(&s)
+	if err == nil {
+		t.Fatal("SecureStringRequired() = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "REQUIRED_MISSING") {
+		t.Errorf("error %q does not mention var name", err.Error())
+	}
+}
+
+func TestSecureStringRequired_SetVar_ReturnsNil(t *testing.T) {
+	t.Setenv("REQUIRED_PRESENT", "myvalue")
+
+	var s config.SecureString
+	s.Set("env://REQUIRED_PRESENT")
+
+	if err := envresolve.SecureStringRequired(&s); err != nil {
+		t.Fatalf("SecureStringRequired() = %v, want nil", err)
+	}
+	if s.String() != "myvalue" {
+		t.Errorf("s.String() = %q, want %q", s.String(), "myvalue")
 	}
 }
 

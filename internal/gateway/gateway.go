@@ -11,6 +11,7 @@ import (
 
 	"github.com/sushi30/sushiclaw/internal/envresolve"
 	"github.com/sushi30/sushiclaw/pkg/channels/email"
+	sushitools "github.com/sushi30/sushiclaw/pkg/tools"
 
 	"github.com/sipeed/picoclaw/pkg/agent"
 	"github.com/sipeed/picoclaw/pkg/audio/asr"
@@ -79,6 +80,22 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 
 	msgBus := bus.NewMessageBus()
 	agentLoop := agent.NewAgentLoop(cfg, msgBus, provider)
+
+	if allowedSenders := sushitools.ParseAllowedSenders(); len(allowedSenders) > 0 {
+		if cfg.Tools.IsToolEnabled("exec") {
+			workingDir := cfg.Agents.Defaults.Workspace
+			restrict := cfg.Agents.Defaults.RestrictToWorkspace
+			trustedExec, err := sushitools.NewTrustedExecTool(cfg, workingDir, restrict, allowedSenders)
+			if err != nil {
+				logger.WarnCF("gateway", "Failed to init trusted exec tool",
+					map[string]any{"error": err.Error()})
+			} else {
+				agentLoop.RegisterTool(trustedExec)
+				logger.InfoCF("gateway", "Trusted exec registered",
+					map[string]any{"senders": allowedSenders})
+			}
+		}
+	}
 
 	startupInfo := agentLoop.GetStartupInfo()
 	toolsInfo := startupInfo["tools"].(map[string]any)

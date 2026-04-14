@@ -1,0 +1,25 @@
+# Automatically adds newly opened issues and PRs to the GitHub Project at
+# https://github.com/users/sushi30/projects/5
+#
+# Setup: create a fine-grained PAT (or classic PAT) with the `project` scope
+# and store it as a repository secret named ADD_TO_PROJECT_TOKEN.
+name: Add Issues and PRs to Project
+
+on:
+  issues:
+    types: [opened, reopened]
+  pull_request:
+    types: [opened, reopened]
+
+jobs:
+  add-to-project:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    steps:
+      - uses: actions/add-to-project@v1.0.2
+        with:
+          project-url: https://github.com/users/sushi30/projects/5
+          github-token: ${{ secrets.ADD_TO_PROJECT_TOKEN }}

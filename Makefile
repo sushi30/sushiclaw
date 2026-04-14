@@ -1,7 +1,7 @@
 BINARY := sushiclaw
 INSTALL_DIR := $(HOME)/.local/bin
 
-.PHONY: build test install lint fmt vet deps sync-picoclaw
+.PHONY: build test install lint fmt vet deps sync-picoclaw test-e2e
 
 build:
 	CGO_ENABLED=0 go build -o $(BINARY) .
@@ -27,3 +27,6 @@ deps:
 sync-picoclaw:
 	git submodule update --remote picoclaw
 	go mod tidy
+
+test-e2e:
+	go test -v -run 'TestEmailInboundPipeline|TestEmailOutboundPipeline' ./pkg/channels/email/...

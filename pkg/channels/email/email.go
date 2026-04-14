@@ -24,20 +24,20 @@ import (
 // EmailConfig holds configuration for the email channel.
 // Loaded from the "channels.email" section of the picoclaw config JSON.
 type EmailConfig struct {
-	Enabled            bool                        `json:"enabled"`
-	SMTPHost           string                      `json:"smtp_host"`
-	SMTPPort           int                         `json:"smtp_port"`
-	SMTPFrom           config.SecureString         `json:"smtp_from"`
-	SMTPUser           config.SecureString         `json:"smtp_user"`
-	SMTPPassword       config.SecureString         `json:"smtp_password"`
-	DefaultSubject     string                      `json:"default_subject"`
-	IMAPHost           string                      `json:"imap_host"`
-	IMAPPort           int                         `json:"imap_port"`
-	IMAPUser           config.SecureString         `json:"imap_user"`
-	IMAPPassword       config.SecureString         `json:"imap_password"`
-	PollIntervalSecs   int                         `json:"poll_interval_secs"`
-	AllowFrom          config.FlexibleStringSlice  `json:"allow_from"`
-	ReasoningChannelID string                      `json:"reasoning_channel_id"`
+	Enabled            bool                       `json:"enabled"`
+	SMTPHost           string                     `json:"smtp_host"`
+	SMTPPort           int                        `json:"smtp_port"`
+	SMTPFrom           config.SecureString        `json:"smtp_from"`
+	SMTPUser           config.SecureString        `json:"smtp_user"`
+	SMTPPassword       config.SecureString        `json:"smtp_password"`
+	DefaultSubject     string                     `json:"default_subject"`
+	IMAPHost           string                     `json:"imap_host"`
+	IMAPPort           int                        `json:"imap_port"`
+	IMAPUser           config.SecureString        `json:"imap_user"`
+	IMAPPassword       config.SecureString        `json:"imap_password"`
+	PollIntervalSecs   int                        `json:"poll_interval_secs"`
+	AllowFrom          config.FlexibleStringSlice `json:"allow_from"`
+	ReasoningChannelID string                     `json:"reasoning_channel_id"`
 }
 
 // EmailChannel implements the Channel interface using SMTP (outbound) and IMAP polling (inbound).
@@ -223,7 +223,6 @@ func (c *EmailChannel) pollIMAP() {
 		err    error
 	)
 
-	// Port 993 = implicit TLS, anything else = plain (STARTTLS not yet supported).
 	if imapPort == 993 {
 		tlsCfg := &tls.Config{ServerName: c.config.IMAPHost}
 		client, err = imapclient.DialTLS(addr, &imapclient.Options{TLSConfig: tlsCfg})
@@ -274,9 +273,9 @@ func (c *EmailChannel) pollIMAP() {
 		}
 
 		var (
-			envelope        *imap.Envelope
-			bodySectionData *imapclient.FetchItemDataBodySection
-			seqNum          uint32
+			envelope  *imap.Envelope
+			bodyBytes []byte
+			seqNum    uint32
 		)
 
 		seqNum = msg.SeqNum
@@ -290,14 +289,16 @@ func (c *EmailChannel) pollIMAP() {
 			case imapclient.FetchItemDataEnvelope:
 				envelope = v.Envelope
 			case imapclient.FetchItemDataBodySection:
-				bodySectionData = &v
+				if v.Literal != nil {
+					bodyBytes, _ = io.ReadAll(v.Literal)
+				}
 			}
 		}
 
-		if envelope == nil || bodySectionData == nil {
+		if envelope == nil || bodyBytes == nil {
 			continue
 		}
-		processed, _ := c.processEmail(c.ctx, envelope, bodySectionData.Literal)
+		processed, _ := c.processEmail(c.ctx, envelope, bytes.NewReader(bodyBytes))
 		if !processed {
 			continue
 		}
@@ -330,7 +331,7 @@ func (c *EmailChannel) processEmail(ctx context.Context, envelope *imap.Envelope
 		return false, ""
 	}
 
-	logger.DebugCF("email", "Email received", map[string]any{
+	logger.InfoCF("email", "Email received", map[string]any{
 		"from":    fromAddr,
 		"subject": envelope.Subject,
 	})

@@ -1,5 +1,3 @@
-//go:build whatsapp_native
-
 package whatsapp
 
 import (

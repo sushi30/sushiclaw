@@ -1,5 +1,3 @@
-//go:build whatsapp_native
-
 // PicoClaw - Ultra-lightweight personal AI agent
 // License: MIT
 //
@@ -275,9 +273,9 @@ func (c *WhatsAppNativeChannel) Stop(ctx context.Context) error {
 }
 
 func (c *WhatsAppNativeChannel) eventHandler(evt any) {
-	switch evt.(type) {
+	switch evt := evt.(type) {
 	case *events.Message:
-		c.handleIncoming(evt.(*events.Message))
+		c.handleIncoming(evt)
 	case *events.Disconnected:
 		logger.InfoCF("whatsapp", "WhatsApp disconnected, will attempt reconnection", nil)
 		c.reconnectMu.Lock()
@@ -377,7 +375,7 @@ func (c *WhatsAppNativeChannel) handleIncoming(evt *events.Message) {
 
 	// Download media attachment, if present and a MediaStore is configured.
 	if store := c.GetMediaStore(); store != nil {
-		data, err := c.client.DownloadAny(c.runCtx, evt.Message)
+		data, err := c.client.DownloadAny(c.runCtx, evt.Message) //nolint:staticcheck // DownloadAny is deprecated upstream; per-type Download refactor is a separate task
 		if err != nil && !errors.Is(err, whatsmeow.ErrNothingDownloadableFound) {
 			logger.DebugCF("whatsapp", "media download failed", map[string]any{"err": err})
 		}

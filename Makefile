@@ -4,10 +4,10 @@ INSTALL_DIR := $(HOME)/.local/bin
 .PHONY: build test install lint fmt vet deps sync-picoclaw
 
 build:
-	CGO_ENABLED=0 go build -tags whatsapp_native -o $(BINARY) .
+	CGO_ENABLED=0 go build -o $(BINARY) .
 
 test:
-	go test -tags whatsapp_native ./...
+	go test ./...
 
 install: build
 	cp $(BINARY) $(INSTALL_DIR)/$(BINARY)

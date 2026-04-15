@@ -3,7 +3,9 @@ package email
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/smtp"
@@ -43,8 +45,9 @@ type EmailConfig struct {
 
 // threadInfo holds the metadata needed to construct threading headers for a reply.
 type threadInfo struct {
-	subject   string
-	inReplyTo []string // Message-IDs from the In-Reply-To header of the original email
+	subject    string
+	inReplyTo  []string // Message-IDs from the In-Reply-To header of the original email
+	threadRoot string   // root Message-ID of the conversation thread
 }
 
 // EmailChannel implements the Channel interface using SMTP (outbound) and IMAP polling (inbound).
@@ -133,9 +136,9 @@ func (c *EmailChannel) Send(ctx context.Context, msg bus.OutboundMessage) ([]str
 		subject = "Message"
 	}
 
-	var extraHeaders strings.Builder
+	var inReplyTo []string
+	var root string
 	if msg.ReplyToMessageID != "" {
-		var inReplyTo []string
 		if v, ok := c.threads.Load(msg.ReplyToMessageID); ok {
 			info := v.(threadInfo)
 			if info.subject != "" {
@@ -146,8 +149,16 @@ func (c *EmailChannel) Send(ctx context.Context, msg bus.OutboundMessage) ([]str
 				subject = s
 			}
 			inReplyTo = info.inReplyTo
+			root = info.threadRoot
 		}
-		// Wrap raw message ID in angle brackets per RFC 2822.
+	}
+
+	outboundMsgID := generateMessageID(extractDomain(c.config.SMTPFrom.String()))
+
+	var extraHeaders strings.Builder
+	extraHeaders.WriteString("Message-ID: " + outboundMsgID + "\r\n")
+
+	if msg.ReplyToMessageID != "" {
 		replyTo := "<" + msg.ReplyToMessageID + ">"
 		extraHeaders.WriteString("In-Reply-To: " + replyTo + "\r\n")
 		extraHeaders.WriteString("References: " + buildReferences(replyTo, inReplyTo) + "\r\n")
@@ -192,6 +203,21 @@ func (c *EmailChannel) Send(ctx context.Context, msg bus.OutboundMessage) ([]str
 			return nil, fmt.Errorf("smtp send: %w: %w", err, channels.ErrTemporary)
 		}
 	}
+
+	// Store thread info for the outbound message so future inbound replies
+	// can trace back to this thread.
+	outboundRawID := strings.Trim(outboundMsgID, "<>")
+	if root == "" && msg.ReplyToMessageID != "" {
+		root = msg.ReplyToMessageID
+	}
+	if root == "" {
+		root = outboundRawID
+	}
+	c.threads.Store(outboundRawID, threadInfo{
+		subject:    subject,
+		inReplyTo:  append(inReplyTo, "<"+msg.ReplyToMessageID+">"),
+		threadRoot: root,
+	})
 
 	logger.DebugCF("email", "Message sent", map[string]any{"to": to})
 	return nil, nil
@@ -364,11 +390,32 @@ func (c *EmailChannel) processEmail(ctx context.Context, envelope *imap.Envelope
 		"subject": envelope.Subject,
 	})
 
+	root := threadRoot(envelope.InReplyTo)
+	if root != "" {
+		// If the In-Reply-To points to a message we sent, resolve to
+		// the original thread root so the agent continues the same session.
+		if v, ok := c.threads.Load(root); ok {
+			info := v.(threadInfo)
+			if info.threadRoot != "" {
+				root = info.threadRoot
+			}
+		}
+	}
+	if root == "" && envelope.MessageID != "" {
+		root = envelope.MessageID
+	}
+
 	if envelope.MessageID != "" {
 		c.threads.Store(envelope.MessageID, threadInfo{
-			subject:   envelope.Subject,
-			inReplyTo: envelope.InReplyTo,
+			subject:    envelope.Subject,
+			inReplyTo:  envelope.InReplyTo,
+			threadRoot: root,
 		})
+	}
+
+	metadata := map[string]string{}
+	if root != "" {
+		metadata["reply_to_message_id"] = root
 	}
 
 	sender := bus.SenderInfo{
@@ -381,7 +428,7 @@ func (c *EmailChannel) processEmail(ctx context.Context, envelope *imap.Envelope
 	c.HandleMessage(ctx,
 		bus.Peer{Kind: "direct", ID: fromAddr},
 		envelope.MessageID, fromAddr, fromAddr, plainText,
-		nil, nil,
+		nil, metadata,
 		sender,
 	)
 
@@ -395,6 +442,32 @@ func buildReferences(messageID string, inReplyTo []string) string {
 	parts = append(parts, inReplyTo...)
 	parts = append(parts, messageID)
 	return strings.Join(parts, " ")
+}
+
+// threadRoot extracts the first message ID from an In-Reply-To header list,
+// stripping angle brackets if present. Returns empty string if none.
+func threadRoot(inReplyTo []string) string {
+	if len(inReplyTo) == 0 {
+		return ""
+	}
+	first := inReplyTo[0]
+	first = strings.Trim(first, " <>")
+	return first
+}
+
+// generateMessageID creates a unique RFC 2822 Message-ID in the form <hex@domain>.
+func generateMessageID(domain string) string {
+	var buf [16]byte
+	_, _ = rand.Read(buf[:])
+	return "<" + hex.EncodeToString(buf[:]) + "@" + domain + ">"
+}
+
+// extractDomain returns the domain part of an email address (after @).
+func extractDomain(addr string) string {
+	if idx := strings.LastIndex(addr, "@"); idx >= 0 {
+		return addr[idx+1:]
+	}
+	return addr
 }
 
 func extractFrom(env *imap.Envelope) string {

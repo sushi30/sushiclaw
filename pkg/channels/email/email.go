@@ -176,13 +176,13 @@ func (c *EmailChannel) Send(ctx context.Context, msg bus.OutboundMessage) ([]str
 	var bodyBuf bytes.Buffer
 	w, err := gomail.CreateSingleInlineWriter(&bodyBuf, h)
 	if err != nil {
-		return nil, fmt.Errorf("create mime writer: %w", channels.ErrSendFailed)
+		return nil, fmt.Errorf("create mime writer: %w: %w", err, channels.ErrSendFailed)
 	}
 	if _, err := w.Write([]byte(msg.Content)); err != nil {
-		return nil, fmt.Errorf("write mime body: %w", channels.ErrSendFailed)
+		return nil, fmt.Errorf("write mime body: %w: %w", err, channels.ErrSendFailed)
 	}
 	if err := w.Close(); err != nil {
-		return nil, fmt.Errorf("close mime body: %w", channels.ErrSendFailed)
+		return nil, fmt.Errorf("close mime body: %w: %w", err, channels.ErrSendFailed)
 	}
 
 	smtpPort := c.config.SMTPPort
@@ -224,19 +224,18 @@ func (c *EmailChannel) Send(ctx context.Context, msg bus.OutboundMessage) ([]str
 
 	// Store thread info for the outbound message so future inbound replies
 	// can trace back to this thread.
-	outboundRawID := outboundMsgIDRaw
 	if root == "" && msg.ReplyToMessageID != "" {
 		root = msg.ReplyToMessageID
 	}
 	if root == "" {
-		root = outboundRawID
+		root = outboundMsgIDRaw
 	}
 	var outboundRefs []string
 	outboundRefs = append(outboundRefs, parentRefs...)
 	if msg.ReplyToMessageID != "" {
 		outboundRefs = append(outboundRefs, "<"+msg.ReplyToMessageID+">")
 	}
-	c.threads.Store(outboundRawID, threadInfo{
+	c.threads.Store(outboundMsgIDRaw, threadInfo{
 		subject:    subject,
 		references: outboundRefs,
 		threadRoot: root,
@@ -425,7 +424,7 @@ func (c *EmailChannel) processEmail(ctx context.Context, envelope *imap.Envelope
 		}
 	}
 	if root == "" && envelope.MessageID != "" {
-		root = envelope.MessageID
+		root = strings.Trim(envelope.MessageID, "<>")
 	}
 
 	if envelope.MessageID != "" {

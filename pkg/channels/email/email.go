@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/smtp"
 	"strings"
+	"sync"
 	"time"
 
 	imap "github.com/emersion/go-imap/v2"
@@ -40,12 +41,19 @@ type EmailConfig struct {
 	ReasoningChannelID string                     `json:"reasoning_channel_id"`
 }
 
+// threadInfo holds the metadata needed to construct threading headers for a reply.
+type threadInfo struct {
+	subject   string
+	inReplyTo []string // Message-IDs from the In-Reply-To header of the original email
+}
+
 // EmailChannel implements the Channel interface using SMTP (outbound) and IMAP polling (inbound).
 type EmailChannel struct {
 	*channels.BaseChannel
-	config EmailConfig
-	ctx    context.Context
-	cancel context.CancelFunc
+	config  EmailConfig
+	ctx     context.Context
+	cancel  context.CancelFunc
+	threads sync.Map // messageID (string) → threadInfo
 }
 
 // NewEmailChannel creates a new email channel.
@@ -125,6 +133,26 @@ func (c *EmailChannel) Send(ctx context.Context, msg bus.OutboundMessage) ([]str
 		subject = "Message"
 	}
 
+	var extraHeaders strings.Builder
+	if msg.ReplyToMessageID != "" {
+		var inReplyTo []string
+		if v, ok := c.threads.Load(msg.ReplyToMessageID); ok {
+			info := v.(threadInfo)
+			if info.subject != "" {
+				s := info.subject
+				if !strings.HasPrefix(strings.ToLower(s), "re: ") {
+					s = "Re: " + s
+				}
+				subject = s
+			}
+			inReplyTo = info.inReplyTo
+		}
+		// Wrap raw message ID in angle brackets per RFC 2822.
+		replyTo := "<" + msg.ReplyToMessageID + ">"
+		extraHeaders.WriteString("In-Reply-To: " + replyTo + "\r\n")
+		extraHeaders.WriteString("References: " + buildReferences(replyTo, inReplyTo) + "\r\n")
+	}
+
 	smtpPort := c.config.SMTPPort
 	if smtpPort == 0 {
 		smtpPort = 587
@@ -136,8 +164,8 @@ func (c *EmailChannel) Send(ctx context.Context, msg bus.OutboundMessage) ([]str
 		smtpUser = c.config.SMTPFrom.String()
 	}
 
-	body := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\n\r\n%s",
-		c.config.SMTPFrom.String(), to, subject, msg.Content)
+	body := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\n%s\r\n%s",
+		c.config.SMTPFrom.String(), to, subject, extraHeaders.String(), msg.Content)
 
 	var auth smtp.Auth
 	if c.config.SMTPPassword.String() != "" {
@@ -336,6 +364,13 @@ func (c *EmailChannel) processEmail(ctx context.Context, envelope *imap.Envelope
 		"subject": envelope.Subject,
 	})
 
+	if envelope.MessageID != "" {
+		c.threads.Store(envelope.MessageID, threadInfo{
+			subject:   envelope.Subject,
+			inReplyTo: envelope.InReplyTo,
+		})
+	}
+
 	sender := bus.SenderInfo{
 		Platform:    "email",
 		PlatformID:  fromAddr,
@@ -351,6 +386,15 @@ func (c *EmailChannel) processEmail(ctx context.Context, envelope *imap.Envelope
 	)
 
 	return true, plainText
+}
+
+// buildReferences constructs the RFC 2822 References header value for a reply.
+// It concatenates any prior inReplyTo IDs with the current messageID.
+func buildReferences(messageID string, inReplyTo []string) string {
+	parts := make([]string, 0, len(inReplyTo)+1)
+	parts = append(parts, inReplyTo...)
+	parts = append(parts, messageID)
+	return strings.Join(parts, " ")
 }
 
 func extractFrom(env *imap.Envelope) string {

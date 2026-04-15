@@ -323,6 +323,9 @@ func (c *WhatsAppNativeChannel) reconnectWithBackoff() {
 		if client == nil {
 			return
 		}
+		if client.IsConnected() {
+			return
+		}
 
 		logger.InfoCF("whatsapp", "WhatsApp reconnecting", map[string]any{"backoff": backoff.String()})
 		err := client.Connect()

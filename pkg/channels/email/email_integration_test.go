@@ -62,7 +62,7 @@ func startMockIMAPServer(t *testing.T, rawMIME string) (host, port string) {
 
 	go func() { _ = srv.Serve(ln) }()
 
-	t.Cleanup(func() { srv.Close() })
+	t.Cleanup(func() { _ = srv.Close() })
 
 	addr := ln.Addr().String()
 	h, p, _ := net.SplitHostPort(addr)
@@ -86,12 +86,12 @@ func startSMTPCapture(t *testing.T) (host, port string, received <-chan string) 
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 
 		rw := bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn))
 
 		send := func(line string) {
-			fmt.Fprintf(conn, "%s\r\n", line)
+			_, _ = fmt.Fprintf(conn, "%s\r\n", line)
 		}
 
 		send("220 localhost ESMTP test")
@@ -114,9 +114,7 @@ func startSMTPCapture(t *testing.T) (host, port string, received <-chan string) 
 					inData = false
 				} else {
 					// RFC 5321: lines starting with "." are dot-stuffed
-					if strings.HasPrefix(line, ".") {
-						line = line[1:]
-					}
+					line = strings.TrimPrefix(line, ".")
 					body.WriteString(line)
 					body.WriteString("\r\n")
 				}
@@ -140,7 +138,7 @@ func startSMTPCapture(t *testing.T) (host, port string, received <-chan string) 
 		}
 	}()
 
-	t.Cleanup(func() { ln.Close() })
+	t.Cleanup(func() { _ = ln.Close() })
 
 	addr := ln.Addr().String()
 	h, p, _ := net.SplitHostPort(addr)
@@ -241,6 +239,93 @@ func TestEmailOutboundPipeline(t *testing.T) {
 		}
 		if !strings.Contains(body, "user@example.com") {
 			t.Errorf("SMTP body does not contain recipient:\n%s", body)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout: SMTP capture received nothing")
+	}
+}
+
+// TestEmailReplyThreading verifies that when Send is called with a ReplyToMessageID
+// matching an email that was previously received via IMAP, the outbound SMTP message
+// contains RFC 2822 threading headers (In-Reply-To, References) and a Re: subject.
+func TestEmailReplyThreading(t *testing.T) {
+	// IMAP parses Message-ID and strips angle brackets.
+	// The raw header is "<orig-123@test.com>" but envelope.MessageID == "orig-123@test.com".
+	const originalMsgID = "orig-123@test.com"
+	const originalSubject = "Hello Agent"
+
+	rawMIME := "From: sender@example.com\r\nTo: bot@test.com\r\n" +
+		"Subject: " + originalSubject + "\r\n" +
+		"Message-ID: <" + originalMsgID + ">\r\n" +
+		"MIME-Version: 1.0\r\n" +
+		"Content-Type: text/plain; charset=utf-8\r\n\r\n" +
+		"Please reply to this"
+
+	imapHost, imapPort := startMockIMAPServer(t, rawMIME)
+	imapPortInt, _ := strconv.Atoi(imapPort)
+
+	smtpHost, smtpPort, received := startSMTPCapture(t)
+	smtpPortInt, _ := strconv.Atoi(smtpPort)
+
+	msgBus := bus.NewMessageBus()
+	cfg := EmailConfig{
+		SMTPHost:         smtpHost,
+		SMTPPort:         smtpPortInt,
+		SMTPFrom:         *config.NewSecureString("bot@test.com"),
+		DefaultSubject:   "Message",
+		IMAPHost:         imapHost,
+		IMAPPort:         imapPortInt,
+		IMAPUser:         *config.NewSecureString("testuser"),
+		IMAPPassword:     *config.NewSecureString("testpass"),
+		PollIntervalSecs: 1,
+	}
+
+	ch, err := NewEmailChannel(cfg, msgBus)
+	if err != nil {
+		t.Fatalf("NewEmailChannel: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := ch.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer ch.Stop(ctx) //nolint:errcheck
+
+	// Wait for the inbound message — this proves processEmail ran and populated the cache.
+	select {
+	case msg := <-msgBus.InboundChan():
+		if msg.MessageID != originalMsgID {
+			t.Errorf("inbound MessageID = %q, want %q", msg.MessageID, originalMsgID)
+		}
+	case <-ctx.Done():
+		t.Fatal("timeout: no inbound message — IMAP poll did not deliver the message")
+	}
+
+	// Now send the reply using the original Message-ID as ReplyToMessageID.
+	_, err = ch.Send(ctx, bus.OutboundMessage{
+		ChatID:           "sender@example.com",
+		Content:          "This is my reply",
+		ReplyToMessageID: originalMsgID,
+	})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	// Send wraps the raw messageID in angle brackets per RFC 2822.
+	msgIDHeader := "<" + originalMsgID + ">"
+
+	select {
+	case body := <-received:
+		if !strings.Contains(body, "Subject: Re: "+originalSubject) {
+			t.Errorf("SMTP body missing Re: subject:\n%s", body)
+		}
+		if !strings.Contains(body, "In-Reply-To: "+msgIDHeader) {
+			t.Errorf("SMTP body missing In-Reply-To header:\n%s", body)
+		}
+		if !strings.Contains(body, "References: "+msgIDHeader) {
+			t.Errorf("SMTP body missing References header:\n%s", body)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timeout: SMTP capture received nothing")

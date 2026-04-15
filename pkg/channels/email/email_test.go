@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -380,6 +381,117 @@ func TestProcessEmail_TextInteraction(t *testing.T) {
 		if inbound.Content != "Hello from email" {
 			t.Fatalf("content=%q", inbound.Content)
 		}
+	}
+}
+
+func TestSend_ReplyThreadingHeaders(t *testing.T) {
+	// Raw message IDs have no angle brackets (as returned by imap.Envelope.MessageID).
+	// Send wraps them in <> when writing RFC 2822 headers.
+	tests := []struct {
+		name             string
+		cachedSubject    string
+		cachedInReplyTo  []string
+		replyToMessageID string // raw, no angle brackets
+		wantSubjectLine  string
+		wantInReplyTo    string
+		wantReferences   string
+		wantNoThreading  bool
+	}{
+		{
+			name:             "reply with known subject",
+			cachedSubject:    "Hello Agent",
+			cachedInReplyTo:  nil,
+			replyToMessageID: "orig@test.com",
+			wantSubjectLine:  "Subject: Re: Hello Agent",
+			wantInReplyTo:    "In-Reply-To: <orig@test.com>",
+			wantReferences:   "References: <orig@test.com>",
+		},
+		{
+			name:             "subject already has Re: prefix",
+			cachedSubject:    "Re: Hello Agent",
+			cachedInReplyTo:  nil,
+			replyToMessageID: "orig@test.com",
+			wantSubjectLine:  "Subject: Re: Hello Agent",
+			wantInReplyTo:    "In-Reply-To: <orig@test.com>",
+			wantReferences:   "References: <orig@test.com>",
+		},
+		{
+			name:             "reply with prior References chain",
+			cachedSubject:    "Hello Agent",
+			cachedInReplyTo:  []string{"<first@test.com>"},
+			replyToMessageID: "orig@test.com",
+			wantSubjectLine:  "Subject: Re: Hello Agent",
+			wantInReplyTo:    "In-Reply-To: <orig@test.com>",
+			wantReferences:   "References: <first@test.com> <orig@test.com>",
+		},
+		{
+			name:             "no ReplyToMessageID — no threading headers",
+			cachedSubject:    "Hello Agent",
+			replyToMessageID: "",
+			wantNoThreading:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			smtpHost, smtpPort, received := startSMTPCapture(t)
+			smtpPortInt, _ := strconv.Atoi(smtpPort)
+
+			msgBus := bus.NewMessageBus()
+			cfg := EmailConfig{
+				SMTPHost:       smtpHost,
+				SMTPPort:       smtpPortInt,
+				SMTPFrom:       *config.NewSecureString("bot@test.com"),
+				DefaultSubject: "Message",
+				IMAPHost:       "127.0.0.1",
+				IMAPPort:       10143,
+				IMAPUser:       *config.NewSecureString("u"),
+				IMAPPassword:   *config.NewSecureString("p"),
+			}
+
+			ch, err := NewEmailChannel(cfg, msgBus)
+			if err != nil {
+				t.Fatalf("NewEmailChannel: %v", err)
+			}
+			ch.SetRunning(true)
+
+			if tt.replyToMessageID != "" {
+				ch.threads.Store(tt.replyToMessageID, threadInfo{
+					subject:   tt.cachedSubject,
+					inReplyTo: tt.cachedInReplyTo,
+				})
+			}
+
+			ctx := context.Background()
+			_, err = ch.Send(ctx, bus.OutboundMessage{
+				ChatID:           "user@example.com",
+				Content:          "Agent reply",
+				ReplyToMessageID: tt.replyToMessageID,
+			})
+			if err != nil {
+				t.Fatalf("Send: %v", err)
+			}
+
+			select {
+			case body := <-received:
+				if tt.wantNoThreading {
+					if strings.Contains(body, "In-Reply-To:") {
+						t.Errorf("expected no In-Reply-To header, got:\n%s", body)
+					}
+					if strings.Contains(body, "References:") {
+						t.Errorf("expected no References header, got:\n%s", body)
+					}
+					return
+				}
+				for _, want := range []string{tt.wantSubjectLine, tt.wantInReplyTo, tt.wantReferences} {
+					if !strings.Contains(body, want) {
+						t.Errorf("SMTP body missing %q:\n%s", want, body)
+					}
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("timeout: SMTP capture received nothing")
+			}
+		})
 	}
 }
 

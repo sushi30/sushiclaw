@@ -80,6 +80,23 @@ Apply relevant patches manually. The interface contract to watch for:
 - `channels.Channel` interface (in picoclaw's `pkg/channels/base.go`)
 - `bus.OutboundMessage` / `bus.InboundMessage` (in picoclaw's `pkg/bus/types.go`)
 
+## Customizing agent behavior
+
+sushiclaw consumes picoclaw's agent loop (`pkg/agent/loop.go`) directly via the
+submodule. When we need to change agent behavior (e.g. how slash commands are
+handled), follow the gateway pattern: wrap or extend picoclaw's implementation
+in `internal/gateway/` or sushiclaw-specific packages rather than forking the
+agent loop code. This keeps us on a clean upgrade path — we update the
+picoclaw submodule and only maintain our own wrapper code.
+
+Examples:
+- **Slash command behavior**: Controlled by `pkg/commands/executor.go` in
+  picoclaw. If sushiclaw needs different command routing, wrap the executor in
+  `internal/gateway/` rather than copying executor code.
+- **Channel-specific logic**: Owned channels (whatsapp_native, telegram, email)
+  can be customized freely since we own the full package. Upstream changes to
+  these channels must be synced manually (see "Syncing channel fixes" above).
+
 ## go.mod hygiene
 
 Always run `make deps` (`go mod tidy`) after:

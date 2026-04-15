@@ -76,6 +76,49 @@ func TestGenerateMessageID(t *testing.T) {
 	}
 }
 
+func TestNormalizeMsgIDs(t *testing.T) {
+	tests := []struct {
+		name string
+		ids  []string
+		want []string
+	}{
+		{
+			name: "nil input",
+			ids:  nil,
+			want: nil,
+		},
+		{
+			name: "already bracketed",
+			ids:  []string{"<msg@test.com>"},
+			want: []string{"<msg@test.com>"},
+		},
+		{
+			name: "bare id gets bracketed",
+			ids:  []string{"msg@test.com"},
+			want: []string{"<msg@test.com>"},
+		},
+		{
+			name: "mixed bracketing",
+			ids:  []string{"<first@test.com>", "second@test.com"},
+			want: []string{"<first@test.com>", "<second@test.com>"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeMsgIDs(tt.ids)
+			if len(got) != len(tt.want) {
+				t.Fatalf("normalizeMsgIDs() = %v, want %v", got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("normalizeMsgIDs()[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
 func TestNewEmailChannel(t *testing.T) {
 	msgBus := bus.NewMessageBus()
 
@@ -456,7 +499,7 @@ func TestSend_ReplyThreadingHeaders(t *testing.T) {
 	tests := []struct {
 		name             string
 		cachedSubject    string
-		cachedInReplyTo  []string
+		cachedReferences []string
 		replyToMessageID string // raw, no angle brackets
 		wantSubjectLine  string
 		wantInReplyTo    string
@@ -466,7 +509,7 @@ func TestSend_ReplyThreadingHeaders(t *testing.T) {
 		{
 			name:             "reply with known subject",
 			cachedSubject:    "Hello Agent",
-			cachedInReplyTo:  nil,
+			cachedReferences: nil,
 			replyToMessageID: "orig@test.com",
 			wantSubjectLine:  "Subject: Re: Hello Agent",
 			wantInReplyTo:    "In-Reply-To: <orig@test.com>",
@@ -475,7 +518,7 @@ func TestSend_ReplyThreadingHeaders(t *testing.T) {
 		{
 			name:             "subject already has Re: prefix",
 			cachedSubject:    "Re: Hello Agent",
-			cachedInReplyTo:  nil,
+			cachedReferences: nil,
 			replyToMessageID: "orig@test.com",
 			wantSubjectLine:  "Subject: Re: Hello Agent",
 			wantInReplyTo:    "In-Reply-To: <orig@test.com>",
@@ -484,7 +527,7 @@ func TestSend_ReplyThreadingHeaders(t *testing.T) {
 		{
 			name:             "reply with prior References chain",
 			cachedSubject:    "Hello Agent",
-			cachedInReplyTo:  []string{"<first@test.com>"},
+			cachedReferences: []string{"<first@test.com>"},
 			replyToMessageID: "orig@test.com",
 			wantSubjectLine:  "Subject: Re: Hello Agent",
 			wantInReplyTo:    "In-Reply-To: <orig@test.com>",
@@ -524,7 +567,7 @@ func TestSend_ReplyThreadingHeaders(t *testing.T) {
 			if tt.replyToMessageID != "" {
 				ch.threads.Store(tt.replyToMessageID, threadInfo{
 					subject:    tt.cachedSubject,
-					inReplyTo:  tt.cachedInReplyTo,
+					references: tt.cachedReferences,
 					threadRoot: tt.replyToMessageID,
 				})
 			}
@@ -543,6 +586,9 @@ func TestSend_ReplyThreadingHeaders(t *testing.T) {
 			case body := <-received:
 				if !strings.Contains(body, "Message-ID: <") {
 					t.Errorf("expected Message-ID header in outbound:\n%s", body)
+				}
+				if !strings.Contains(body, "Date: ") {
+					t.Errorf("expected Date header in outbound:\n%s", body)
 				}
 				if tt.wantNoThreading {
 					if strings.Contains(body, "In-Reply-To:") {

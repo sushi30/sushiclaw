@@ -245,6 +245,12 @@ func TestEmailOutboundPipeline(t *testing.T) {
 		if !strings.Contains(body, "user@example.com") {
 			t.Errorf("SMTP body does not contain recipient:\n%s", body)
 		}
+		if !strings.Contains(body, "Date: ") {
+			t.Errorf("SMTP body missing Date header:\n%s", body)
+		}
+		if !strings.Contains(body, "Message-ID: <") {
+			t.Errorf("SMTP body missing Message-ID header:\n%s", body)
+		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timeout: SMTP capture received nothing")
 	}
@@ -554,7 +560,7 @@ func TestEmailNewEmail_FreshThread(t *testing.T) {
 	// Seed the threads map with thread A info.
 	ch.threads.Store(threadAMsgID, threadInfo{
 		subject:    "Thread A Subject",
-		inReplyTo:  nil,
+		references: nil,
 		threadRoot: threadAMsgID,
 	})
 

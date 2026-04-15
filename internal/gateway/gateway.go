@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -80,8 +81,13 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 
 	provider = wrapWithRetryEmpty(provider)
 
-	msgBus := bus.NewMessageBus()
-	agentLoop := agent.NewAgentLoop(cfg, msgBus, provider)
+	// externalBus: channels publish inbound here; channel manager reads outbound from here.
+	// agentBus: agent loop reads inbound from here; publishes outbound here.
+	// A bridge goroutine intercepts /debug on the inbound path and forwards everything
+	// else to agentBus. A second bridge forwards agent responses back to externalBus.
+	externalBus := bus.NewMessageBus()
+	agentBus := bus.NewMessageBus()
+	agentLoop := agent.NewAgentLoop(cfg, agentBus, provider)
 
 	if allowedSenders := sushitools.ParseAllowedSenders(); len(allowedSenders) > 0 {
 		if cfg.Tools.IsToolEnabled("exec") {
@@ -113,18 +119,22 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 	mediaStore.Start()
 	defer mediaStore.Stop()
 
-	cm, err := channels.NewManager(cfg, msgBus, mediaStore)
+	cm, err := channels.NewManager(cfg, externalBus, mediaStore)
 	if err != nil {
 		return fmt.Errorf("error creating channel manager: %w", err)
 	}
 
-	emailCh, err := email.InitChannel(msgBus)
+	emailCh, err := email.InitChannel(externalBus)
 	if err != nil {
 		return fmt.Errorf("email channel: %w", err)
 	}
 	if emailCh != nil {
 		cm.RegisterChannel("email", emailCh)
 	}
+
+	// Also register the channel manager as stream delegate on agentBus so that
+	// the agent loop's streaming queries (al.bus.GetStreamer) reach the manager.
+	agentBus.SetStreamDelegate(cm)
 
 	agentLoop.SetChannelManager(cm)
 	agentLoop.SetMediaStore(mediaStore)
@@ -157,6 +167,51 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 
 	go agentLoop.Run(ctx) //nolint:errcheck
 
+	debugMgr := &DebugManager{agentLoop: agentLoop, externalBus: externalBus}
+
+	// Inbound bridge: intercept /debug before forwarding to agent loop.
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case msg, ok := <-externalBus.InboundChan():
+				if !ok {
+					return
+				}
+				handleInbound(ctx, msg, debugMgr, agentBus, externalBus)
+			}
+		}
+	}()
+
+	// Outbound bridge: forward agent responses and media back to channels.
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case msg, ok := <-agentBus.OutboundChan():
+				if !ok {
+					return
+				}
+				_ = externalBus.PublishOutbound(ctx, msg)
+			}
+		}
+	}()
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case msg, ok := <-agentBus.OutboundMediaChan():
+				if !ok {
+					return
+				}
+				_ = externalBus.PublishOutboundMedia(ctx, msg)
+			}
+		}
+	}()
+
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	<-sigChan
@@ -172,9 +227,27 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 	}
 	agentLoop.Stop()
 	agentLoop.Close()
+	agentBus.Close()
+	externalBus.Close()
 
 	logger.Info("Gateway stopped")
 	return nil
+}
+
+// handleInbound processes a single inbound message from externalBus.
+// /debug is intercepted and handled by debugMgr; all other messages are
+// forwarded to agentBus for normal agent-loop processing.
+func handleInbound(ctx context.Context, msg bus.InboundMessage, debugMgr *DebugManager, agentBus, externalBus *bus.MessageBus) {
+	if strings.TrimSpace(msg.Content) == "/debug" {
+		reply := debugMgr.Toggle(ctx, msg.Channel, msg.ChatID)
+		_ = externalBus.PublishOutbound(ctx, bus.OutboundMessage{
+			Channel: msg.Channel,
+			ChatID:  msg.ChatID,
+			Content: reply,
+		})
+		return
+	}
+	_ = agentBus.PublishInbound(ctx, msg)
 }
 
 type startupBlockedProvider struct{ reason string }

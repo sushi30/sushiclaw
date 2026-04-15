@@ -16,6 +16,109 @@ import (
 	"github.com/sipeed/picoclaw/pkg/config"
 )
 
+func TestThreadRoot(t *testing.T) {
+	tests := []struct {
+		name      string
+		inReplyTo []string
+		want      string
+	}{
+		{
+			name:      "empty inReplyTo",
+			inReplyTo: nil,
+			want:      "",
+		},
+		{
+			name:      "single message ID with angle brackets",
+			inReplyTo: []string{"<msg-1@test.com>"},
+			want:      "msg-1@test.com",
+		},
+		{
+			name:      "single message ID without angle brackets",
+			inReplyTo: []string{"msg-1@test.com"},
+			want:      "msg-1@test.com",
+		},
+		{
+			name:      "multiple entries returns first",
+			inReplyTo: []string{"<first@test.com>", "<second@test.com>"},
+			want:      "first@test.com",
+		},
+		{
+			name:      "empty string entry",
+			inReplyTo: []string{""},
+			want:      "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := threadRoot(tt.inReplyTo)
+			if got != tt.want {
+				t.Errorf("threadRoot() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGenerateMessageID(t *testing.T) {
+	got := generateMessageID("example.com")
+	if got == "" {
+		t.Fatal("generateMessageID() returned empty string")
+	}
+	if !strings.HasPrefix(got, "<") || !strings.HasSuffix(got, ">") {
+		t.Errorf("generateMessageID() = %q, want angle-bracketed format", got)
+	}
+	if !strings.Contains(got, "@example.com>") {
+		t.Errorf("generateMessageID() = %q, want to contain @example.com", got)
+	}
+	got2 := generateMessageID("example.com")
+	if got == got2 {
+		t.Errorf("generateMessageID() returned same ID twice: %q", got)
+	}
+}
+
+func TestNormalizeMsgIDs(t *testing.T) {
+	tests := []struct {
+		name string
+		ids  []string
+		want []string
+	}{
+		{
+			name: "nil input",
+			ids:  nil,
+			want: nil,
+		},
+		{
+			name: "already bracketed",
+			ids:  []string{"<msg@test.com>"},
+			want: []string{"<msg@test.com>"},
+		},
+		{
+			name: "bare id gets bracketed",
+			ids:  []string{"msg@test.com"},
+			want: []string{"<msg@test.com>"},
+		},
+		{
+			name: "mixed bracketing",
+			ids:  []string{"<first@test.com>", "second@test.com"},
+			want: []string{"<first@test.com>", "<second@test.com>"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeMsgIDs(tt.ids)
+			if len(got) != len(tt.want) {
+				t.Fatalf("normalizeMsgIDs() = %v, want %v", got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("normalizeMsgIDs()[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
 func TestNewEmailChannel(t *testing.T) {
 	msgBus := bus.NewMessageBus()
 
@@ -151,12 +254,12 @@ func TestLoadEmailConfig_ResolvesEnvSecureStrings(t *testing.T) {
 	raw := map[string]any{
 		"channels": map[string]any{
 			"email": map[string]any{
-				"enabled":   true,
-				"smtp_host": "smtp.example.com",
-				"smtp_from": "bot@example.com",
+				"enabled":       true,
+				"smtp_host":     "smtp.example.com",
+				"smtp_from":     "bot@example.com",
 				"smtp_password": "env://EMAIL_SMTP_PASS",
-				"imap_host": "imap.example.com",
-				"imap_user": "bot@example.com",
+				"imap_host":     "imap.example.com",
+				"imap_user":     "bot@example.com",
 				"imap_password": "env://EMAIL_IMAP_PASS",
 			},
 		},
@@ -381,6 +484,12 @@ func TestProcessEmail_TextInteraction(t *testing.T) {
 		if inbound.Content != "Hello from email" {
 			t.Fatalf("content=%q", inbound.Content)
 		}
+		if inbound.Metadata == nil {
+			t.Fatal("expected non-nil metadata")
+		}
+		if inbound.Metadata["reply_to_message_id"] != "mid-1" {
+			t.Errorf("metadata[reply_to_message_id] = %q, want %q", inbound.Metadata["reply_to_message_id"], "mid-1")
+		}
 	}
 }
 
@@ -390,7 +499,7 @@ func TestSend_ReplyThreadingHeaders(t *testing.T) {
 	tests := []struct {
 		name             string
 		cachedSubject    string
-		cachedInReplyTo  []string
+		cachedReferences []string
 		replyToMessageID string // raw, no angle brackets
 		wantSubjectLine  string
 		wantInReplyTo    string
@@ -400,7 +509,7 @@ func TestSend_ReplyThreadingHeaders(t *testing.T) {
 		{
 			name:             "reply with known subject",
 			cachedSubject:    "Hello Agent",
-			cachedInReplyTo:  nil,
+			cachedReferences: nil,
 			replyToMessageID: "orig@test.com",
 			wantSubjectLine:  "Subject: Re: Hello Agent",
 			wantInReplyTo:    "In-Reply-To: <orig@test.com>",
@@ -409,7 +518,7 @@ func TestSend_ReplyThreadingHeaders(t *testing.T) {
 		{
 			name:             "subject already has Re: prefix",
 			cachedSubject:    "Re: Hello Agent",
-			cachedInReplyTo:  nil,
+			cachedReferences: nil,
 			replyToMessageID: "orig@test.com",
 			wantSubjectLine:  "Subject: Re: Hello Agent",
 			wantInReplyTo:    "In-Reply-To: <orig@test.com>",
@@ -418,7 +527,7 @@ func TestSend_ReplyThreadingHeaders(t *testing.T) {
 		{
 			name:             "reply with prior References chain",
 			cachedSubject:    "Hello Agent",
-			cachedInReplyTo:  []string{"<first@test.com>"},
+			cachedReferences: []string{"<first@test.com>"},
 			replyToMessageID: "orig@test.com",
 			wantSubjectLine:  "Subject: Re: Hello Agent",
 			wantInReplyTo:    "In-Reply-To: <orig@test.com>",
@@ -457,8 +566,9 @@ func TestSend_ReplyThreadingHeaders(t *testing.T) {
 
 			if tt.replyToMessageID != "" {
 				ch.threads.Store(tt.replyToMessageID, threadInfo{
-					subject:   tt.cachedSubject,
-					inReplyTo: tt.cachedInReplyTo,
+					subject:    tt.cachedSubject,
+					references: tt.cachedReferences,
+					threadRoot: tt.replyToMessageID,
 				})
 			}
 
@@ -474,6 +584,12 @@ func TestSend_ReplyThreadingHeaders(t *testing.T) {
 
 			select {
 			case body := <-received:
+				if !strings.Contains(body, "Message-ID: <") {
+					t.Errorf("expected Message-ID header in outbound:\n%s", body)
+				}
+				if !strings.Contains(body, "Date: ") {
+					t.Errorf("expected Date header in outbound:\n%s", body)
+				}
 				if tt.wantNoThreading {
 					if strings.Contains(body, "In-Reply-To:") {
 						t.Errorf("expected no In-Reply-To header, got:\n%s", body)

@@ -2,6 +2,7 @@ package whatsapp
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -215,6 +216,217 @@ func TestHandleIncoming_RecentMessage_Processed(t *testing.T) {
 	msg := receiveInbound(t, mb)
 	if msg.Content != content {
 		t.Fatalf("expected content=%q, got %q", content, msg.Content)
+	}
+}
+
+// --- buildOutboundProtoMessage tests ---
+
+func TestBuildOutboundProtoMessage_Buttons(t *testing.T) {
+	msg := bus.OutboundMessage{
+		Content: "fallback",
+		Metadata: map[string]string{
+			"Content-Type":  "application/x-wa-buttons",
+			"X-WA-Body":     "Pick one:",
+			"X-WA-Option-0": "Alpha",
+			"X-WA-Option-1": "Beta",
+			"X-WA-Option-2": "Gamma",
+		},
+	}
+	waMsg := buildOutboundProtoMessage(msg)
+
+	bm := waMsg.GetButtonsMessage()
+	if bm == nil {
+		t.Fatal("expected ButtonsMessage, got nil")
+	}
+	if bm.GetContentText() != "Pick one:" {
+		t.Errorf("body: got %q, want %q", bm.GetContentText(), "Pick one:")
+	}
+	if len(bm.Buttons) != 3 {
+		t.Fatalf("expected 3 buttons, got %d", len(bm.Buttons))
+	}
+	labels := []string{"Alpha", "Beta", "Gamma"}
+	for i, btn := range bm.Buttons {
+		if btn.GetButtonText().GetDisplayText() != labels[i] {
+			t.Errorf("button[%d]: got %q, want %q", i, btn.GetButtonText().GetDisplayText(), labels[i])
+		}
+		if btn.GetButtonID() != fmt.Sprintf("%d", i) {
+			t.Errorf("button[%d] ID: got %q, want %q", i, btn.GetButtonID(), fmt.Sprintf("%d", i))
+		}
+	}
+}
+
+func TestBuildOutboundProtoMessage_ButtonsOverflow(t *testing.T) {
+	msg := bus.OutboundMessage{
+		Content: "fallback",
+		Metadata: map[string]string{
+			"Content-Type":  "application/x-wa-buttons",
+			"X-WA-Body":     "Choose:",
+			"X-WA-Option-0": "One",
+			"X-WA-Option-1": "Two",
+			"X-WA-Option-2": "Three",
+			"X-WA-Option-3": "Four",
+			"X-WA-Option-4": "Five",
+		},
+	}
+	waMsg := buildOutboundProtoMessage(msg)
+
+	bm := waMsg.GetButtonsMessage()
+	if bm == nil {
+		t.Fatal("expected ButtonsMessage, got nil")
+	}
+	if len(bm.Buttons) != 3 {
+		t.Fatalf("expected 3 buttons (overflow collapsed), got %d", len(bm.Buttons))
+	}
+	if bm.Buttons[0].GetButtonText().GetDisplayText() != "One" {
+		t.Errorf("button[0]: got %q, want \"One\"", bm.Buttons[0].GetButtonText().GetDisplayText())
+	}
+	if bm.Buttons[1].GetButtonText().GetDisplayText() != "Two" {
+		t.Errorf("button[1]: got %q, want \"Two\"", bm.Buttons[1].GetButtonText().GetDisplayText())
+	}
+	if bm.Buttons[2].GetButtonText().GetDisplayText() != "Other (chat about this)" {
+		t.Errorf("button[2]: got %q, want \"Other (chat about this)\"", bm.Buttons[2].GetButtonText().GetDisplayText())
+	}
+}
+
+func TestBuildOutboundProtoMessage_List(t *testing.T) {
+	msg := bus.OutboundMessage{
+		Content: "fallback",
+		Metadata: map[string]string{
+			"Content-Type":  "application/x-wa-list",
+			"X-WA-Body":     "Select a city:",
+			"X-WA-Option-0": "New York",
+			"X-WA-Option-1": "London",
+			"X-WA-Option-2": "Tokyo",
+			"X-WA-Option-3": "Sydney",
+		},
+	}
+	waMsg := buildOutboundProtoMessage(msg)
+
+	lm := waMsg.GetListMessage()
+	if lm == nil {
+		t.Fatal("expected ListMessage, got nil")
+	}
+	if lm.GetTitle() != "Select a city:" {
+		t.Errorf("title: got %q, want %q", lm.GetTitle(), "Select a city:")
+	}
+	if len(lm.Sections) != 1 {
+		t.Fatalf("expected 1 section, got %d", len(lm.Sections))
+	}
+	rows := lm.Sections[0].Rows
+	if len(rows) != 4 {
+		t.Fatalf("expected 4 rows, got %d", len(rows))
+	}
+	labels := []string{"New York", "London", "Tokyo", "Sydney"}
+	for i, row := range rows {
+		if row.GetTitle() != labels[i] {
+			t.Errorf("row[%d] title: got %q, want %q", i, row.GetTitle(), labels[i])
+		}
+		// RowID == label so incoming reply carries the choice directly.
+		if row.GetRowID() != labels[i] {
+			t.Errorf("row[%d] ID: got %q, want %q", i, row.GetRowID(), labels[i])
+		}
+	}
+}
+
+func TestBuildOutboundProtoMessage_FallbackPlainText(t *testing.T) {
+	msg := bus.OutboundMessage{Content: "hello world"}
+	waMsg := buildOutboundProtoMessage(msg)
+
+	if waMsg.GetConversation() != "hello world" {
+		t.Errorf("got %q, want %q", waMsg.GetConversation(), "hello world")
+	}
+	if waMsg.GetButtonsMessage() != nil {
+		t.Error("expected no ButtonsMessage on plain fallback")
+	}
+	if waMsg.GetListMessage() != nil {
+		t.Error("expected no ListMessage on plain fallback")
+	}
+}
+
+func TestBuildOutboundProtoMessage_EmptyOptions(t *testing.T) {
+	// Content-Type set but no X-WA-Option-N → fall back to plain text.
+	msg := bus.OutboundMessage{
+		Content: "plain",
+		Metadata: map[string]string{
+			"Content-Type": "application/x-wa-buttons",
+			"X-WA-Body":    "Choose:",
+		},
+	}
+	waMsg := buildOutboundProtoMessage(msg)
+
+	if waMsg.GetConversation() != "plain" {
+		t.Errorf("got %q, want %q", waMsg.GetConversation(), "plain")
+	}
+}
+
+// --- handleIncoming widget reply tests ---
+
+func TestHandleIncoming_ButtonsResponse_Forwarded(t *testing.T) {
+	ch, mb := makeTestChannel(nil)
+
+	evt := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Sender: types.NewJID("1001", types.DefaultUserServer),
+				Chat:   types.NewJID("1001", types.DefaultUserServer),
+			},
+			ID:        "mid-btn",
+			PushName:  "Alice",
+			Timestamp: time.Now().Add(1 * time.Second),
+		},
+		Message: &waE2E.Message{
+			ButtonsResponseMessage: &waE2E.ButtonsResponseMessage{
+				Response: &waE2E.ButtonsResponseMessage_SelectedDisplayText{
+					SelectedDisplayText: "Book a flight",
+				},
+				SelectedButtonID: proto.String("0"),
+				Type:             waE2E.ButtonsResponseMessage_DISPLAY_TEXT.Enum(),
+			},
+		},
+	}
+
+	ch.handleIncoming(evt)
+
+	msg := receiveInbound(t, mb)
+	if msg.Content != "Book a flight" {
+		t.Errorf("content: got %q, want %q", msg.Content, "Book a flight")
+	}
+	if msg.Metadata["wa_reply_type"] != "button" {
+		t.Errorf("wa_reply_type: got %q, want %q", msg.Metadata["wa_reply_type"], "button")
+	}
+}
+
+func TestHandleIncoming_ListResponse_Forwarded(t *testing.T) {
+	ch, mb := makeTestChannel(nil)
+
+	evt := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Sender: types.NewJID("1001", types.DefaultUserServer),
+				Chat:   types.NewJID("1001", types.DefaultUserServer),
+			},
+			ID:        "mid-list",
+			PushName:  "Bob",
+			Timestamp: time.Now().Add(1 * time.Second),
+		},
+		Message: &waE2E.Message{
+			ListResponseMessage: &waE2E.ListResponseMessage{
+				SingleSelectReply: &waE2E.ListResponseMessage_SingleSelectReply{
+					SelectedRowID: proto.String("London"),
+				},
+				ListType: waE2E.ListResponseMessage_SINGLE_SELECT.Enum(),
+			},
+		},
+	}
+
+	ch.handleIncoming(evt)
+
+	msg := receiveInbound(t, mb)
+	if msg.Content != "London" {
+		t.Errorf("content: got %q, want %q", msg.Content, "London")
+	}
+	if msg.Metadata["wa_reply_type"] != "button" {
+		t.Errorf("wa_reply_type: got %q, want %q", msg.Metadata["wa_reply_type"], "button")
 	}
 }
 

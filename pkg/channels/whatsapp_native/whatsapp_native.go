@@ -388,6 +388,26 @@ func (c *WhatsAppNativeChannel) handleIncoming(evt *events.Message) {
 
 	content = utils.SanitizeMessageContent(content)
 
+	// Decode interactive widget replies (button tap / list selection).
+	var waReplyType string
+	if content == "" {
+		if br := evt.Message.GetButtonsResponseMessage(); br != nil {
+			content = br.GetSelectedDisplayText()
+			if content == "" {
+				content = br.GetSelectedButtonID()
+			}
+			waReplyType = "button"
+		} else if lr := evt.Message.GetListResponseMessage(); lr != nil {
+			if sr := lr.GetSingleSelectReply(); sr != nil {
+				content = sr.GetSelectedRowID()
+			}
+			waReplyType = "button"
+		}
+		if waReplyType != "" {
+			content = utils.SanitizeMessageContent(content)
+		}
+	}
+
 	var mediaPaths []string
 
 	// Download media attachment, if present and a MediaStore is configured.
@@ -422,6 +442,9 @@ func (c *WhatsAppNativeChannel) handleIncoming(evt *events.Message) {
 	}
 
 	metadata := make(map[string]string)
+	if waReplyType != "" {
+		metadata["wa_reply_type"] = waReplyType
+	}
 	metadata["message_id"] = evt.Info.ID
 	if evt.Info.PushName != "" {
 		metadata["user_name"] = evt.Info.PushName
@@ -575,14 +598,100 @@ func (c *WhatsAppNativeChannel) Send(ctx context.Context, msg bus.OutboundMessag
 		return nil, fmt.Errorf("invalid chat id %q: %w", msg.ChatID, err)
 	}
 
-	waMsg := &waE2E.Message{
-		Conversation: proto.String(msg.Content),
-	}
+	waMsg := buildOutboundProtoMessage(msg)
 
 	if _, err = client.SendMessage(ctx, to, waMsg); err != nil {
 		return nil, fmt.Errorf("whatsapp send: %w", channels.ErrTemporary)
 	}
 	return nil, nil
+}
+
+// buildOutboundProtoMessage converts an OutboundMessage into a whatsmeow proto
+// message. When MIME-style metadata is present it constructs an interactive
+// widget; otherwise it falls back to a plain Conversation message.
+//
+// Metadata schema:
+//
+//	Content-Type: "application/x-wa-buttons" — button widget (max 3)
+//	Content-Type: "application/x-wa-list"    — list widget (any number of rows)
+//	X-WA-Body:    body text shown above the options
+//	X-WA-Option-N: individual option labels (0-indexed)
+//
+// When Content-Type is "application/x-wa-buttons" and more than 3 options are
+// provided, the first 2 are kept and the rest are collapsed into a synthetic
+// "Other (chat about this)" button, respecting WhatsApp's hard 3-button limit.
+func buildOutboundProtoMessage(msg bus.OutboundMessage) *waE2E.Message {
+	ct := msg.Metadata["Content-Type"]
+	body := msg.Metadata["X-WA-Body"]
+	if body == "" {
+		body = msg.Content
+	}
+
+	var opts []string
+	for i := 0; ; i++ {
+		v, ok := msg.Metadata[fmt.Sprintf("X-WA-Option-%d", i)]
+		if !ok {
+			break
+		}
+		opts = append(opts, v)
+	}
+
+	switch ct {
+	case "application/x-wa-buttons":
+		if len(opts) == 0 {
+			break
+		}
+		display := opts
+		if len(display) > 3 {
+			display = append(opts[:2:2], "Other (chat about this)")
+		}
+		buttons := make([]*waE2E.ButtonsMessage_Button, len(display))
+		for i, label := range display {
+			buttons[i] = &waE2E.ButtonsMessage_Button{
+				ButtonID: proto.String(fmt.Sprintf("%d", i)),
+				ButtonText: &waE2E.ButtonsMessage_Button_ButtonText{
+					DisplayText: proto.String(label),
+				},
+				Type: waE2E.ButtonsMessage_Button_RESPONSE.Enum(),
+			}
+		}
+		return &waE2E.Message{
+			ButtonsMessage: &waE2E.ButtonsMessage{
+				ContentText: proto.String(body),
+				HeaderType:  waE2E.ButtonsMessage_EMPTY.Enum(),
+				Buttons:     buttons,
+			},
+		}
+
+	case "application/x-wa-list":
+		if len(opts) == 0 {
+			break
+		}
+		rows := make([]*waE2E.ListMessage_Row, len(opts))
+		for i, label := range opts {
+			// RowID is set to the label text so that an incoming
+			// ListResponseMessage.SingleSelectReply.SelectedRowID directly
+			// carries the user's choice as the message content.
+			rows[i] = &waE2E.ListMessage_Row{
+				RowID: proto.String(label),
+				Title: proto.String(label),
+			}
+		}
+		return &waE2E.Message{
+			ListMessage: &waE2E.ListMessage{
+				Title:      proto.String(body),
+				ButtonText: proto.String("Select"),
+				ListType:   waE2E.ListMessage_SINGLE_SELECT.Enum(),
+				Sections: []*waE2E.ListMessage_Section{
+					{Rows: rows},
+				},
+			},
+		}
+	}
+
+	return &waE2E.Message{
+		Conversation: proto.String(msg.Content),
+	}
 }
 
 // parseJID converts a chat ID (phone number or JID string) to types.JID.

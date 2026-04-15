@@ -37,6 +37,26 @@ API keys and secrets in `config.json` can reference environment variables instea
 
 The `env://VAR_NAME` scheme is resolved at startup by `internal/envresolve`. This fills a gap in upstream picoclaw which handles `enc://` and `file://` but not `env://`.
 
+### WhatsApp interactive widgets (buttons and lists)
+
+When the agent sets MIME-style metadata on an outbound message, the WhatsApp channel renders native interactive widgets instead of plain text.
+
+**Outbound metadata schema:**
+
+| Key | Value |
+|-----|-------|
+| `Content-Type` | `application/x-wa-buttons` or `application/x-wa-list` |
+| `X-WA-Body` | Body text shown above the options (falls back to `Content` if absent) |
+| `X-WA-Option-0`, `X-WA-Option-1`, … | Individual option labels (0-indexed, contiguous) |
+
+- `application/x-wa-buttons` renders a WhatsApp `ButtonsMessage` (max 3 tappable buttons). If more than 3 options are provided, the first 2 are kept and the rest are collapsed into a synthetic "Other (chat about this)" button.
+- `application/x-wa-list` renders a `ListMessage` with a single-select row list (no limit on rows).
+- If `Content-Type` is absent, unknown, or options are empty, the message falls back to plain text.
+
+**Inbound widget replies:**
+
+When the user taps a button or selects a list row, the reply is forwarded to the agent as plain `Content` (the selected label text) with `metadata["wa_reply_type"] = "button"` attached.
+
 ### Unauthorized sender reply
 
 When a message arrives from a sender not listed in `allow_from`, sushiclaw replies with a rejection message ("You are not authorized to use this bot.") instead of silently dropping the message. Applies to the WhatsApp native channel.

@@ -136,6 +136,9 @@ func (c *EmailChannel) Send(ctx context.Context, msg bus.OutboundMessage) ([]str
 		subject = "Message"
 	}
 
+	outboundMsgID := generateMessageID(extractDomain(c.config.SMTPFrom.String()))
+	outboundMsgIDRaw := strings.Trim(outboundMsgID, "<>")
+
 	var parentRefs []string
 	var root string
 	if msg.ReplyToMessageID != "" {
@@ -153,17 +156,33 @@ func (c *EmailChannel) Send(ctx context.Context, msg bus.OutboundMessage) ([]str
 		}
 	}
 
-	outboundMsgID := generateMessageID(extractDomain(c.config.SMTPFrom.String()))
-	dateStr := time.Now().Format("Mon, 02 Jan 2006 15:04:05 -0700")
+	if msg.ReplyToMessageID == "" && len(outboundMsgIDRaw) >= 8 {
+		subject = fmt.Sprintf("%s [%s]", subject, outboundMsgIDRaw[:8])
+	}
 
-	var extraHeaders strings.Builder
-	extraHeaders.WriteString("Date: " + dateStr + "\r\n")
-	extraHeaders.WriteString("Message-ID: " + outboundMsgID + "\r\n")
+	var h gomail.Header
+	h.SetAddressList("From", []*gomail.Address{{Address: c.config.SMTPFrom.String()}})
+	h.SetAddressList("To", []*gomail.Address{{Address: to}})
+	h.SetSubject(subject)
+	h.SetDate(time.Now())
+	h.SetMessageID(outboundMsgIDRaw)
 
 	if msg.ReplyToMessageID != "" {
-		replyTo := "<" + msg.ReplyToMessageID + ">"
-		extraHeaders.WriteString("In-Reply-To: " + replyTo + "\r\n")
-		extraHeaders.WriteString("References: " + buildReferences(replyTo, parentRefs) + "\r\n")
+		h.SetMsgIDList("In-Reply-To", []string{msg.ReplyToMessageID})
+		refs := buildReferencesList(msg.ReplyToMessageID, parentRefs)
+		h.SetMsgIDList("References", refs)
+	}
+
+	var bodyBuf bytes.Buffer
+	w, err := gomail.CreateSingleInlineWriter(&bodyBuf, h)
+	if err != nil {
+		return nil, fmt.Errorf("create mime writer: %w", channels.ErrSendFailed)
+	}
+	if _, err := w.Write([]byte(msg.Content)); err != nil {
+		return nil, fmt.Errorf("write mime body: %w", channels.ErrSendFailed)
+	}
+	if err := w.Close(); err != nil {
+		return nil, fmt.Errorf("close mime body: %w", channels.ErrSendFailed)
 	}
 
 	smtpPort := c.config.SMTPPort
@@ -176,9 +195,6 @@ func (c *EmailChannel) Send(ctx context.Context, msg bus.OutboundMessage) ([]str
 	if smtpUser == "" {
 		smtpUser = c.config.SMTPFrom.String()
 	}
-
-	body := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\n%s\r\n%s",
-		c.config.SMTPFrom.String(), to, subject, extraHeaders.String(), msg.Content)
 
 	var auth smtp.Auth
 	if c.config.SMTPPassword.String() != "" {
@@ -197,18 +213,18 @@ func (c *EmailChannel) Send(ctx context.Context, msg bus.OutboundMessage) ([]str
 			return nil, fmt.Errorf("smtp new client: %w", channels.ErrTemporary)
 		}
 		defer func() { _ = client.Close() }()
-		if err := sendViaSMTPClient(client, auth, c.config.SMTPFrom.String(), to, []byte(body)); err != nil {
+		if err := sendViaSMTPClient(client, auth, c.config.SMTPFrom.String(), to, bodyBuf.Bytes()); err != nil {
 			return nil, err
 		}
 	} else {
-		if err := smtp.SendMail(addr, auth, c.config.SMTPFrom.String(), []string{to}, []byte(body)); err != nil {
+		if err := smtp.SendMail(addr, auth, c.config.SMTPFrom.String(), []string{to}, bodyBuf.Bytes()); err != nil {
 			return nil, fmt.Errorf("smtp send: %w: %w", err, channels.ErrTemporary)
 		}
 	}
 
 	// Store thread info for the outbound message so future inbound replies
 	// can trace back to this thread.
-	outboundRawID := strings.Trim(outboundMsgID, "<>")
+	outboundRawID := outboundMsgIDRaw
 	if root == "" && msg.ReplyToMessageID != "" {
 		root = msg.ReplyToMessageID
 	}
@@ -446,13 +462,16 @@ func (c *EmailChannel) processEmail(ctx context.Context, envelope *imap.Envelope
 	return true, plainText
 }
 
-// buildReferences constructs the RFC 5322 References header value for a reply.
-// It concatenates the parent's References chain with the current message ID.
-func buildReferences(messageID string, parentRefs []string) string {
-	parts := make([]string, 0, len(parentRefs)+1)
-	parts = append(parts, parentRefs...)
-	parts = append(parts, messageID)
-	return strings.Join(parts, " ")
+// buildReferencesList returns a list of message IDs (without angle brackets)
+// for use with mail.Header.SetMsgIDList. The list contains the parent's
+// References chain followed by the immediate parent's Message-ID.
+func buildReferencesList(parentMsgID string, parentRefs []string) []string {
+	refs := make([]string, 0, len(parentRefs)+1)
+	for _, ref := range parentRefs {
+		refs = append(refs, strings.Trim(ref, " <>"))
+	}
+	refs = append(refs, strings.Trim(parentMsgID, " <>"))
+	return refs
 }
 
 // normalizeMsgIDs ensures all message IDs in a list are angle-bracketed.

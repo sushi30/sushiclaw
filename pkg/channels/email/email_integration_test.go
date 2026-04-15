@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -19,6 +20,8 @@ import (
 	"github.com/sipeed/picoclaw/pkg/channels"
 	"github.com/sipeed/picoclaw/pkg/config"
 )
+
+var subjectHexSuffixRe = regexp.MustCompile(`^Message \[([0-9a-f]{8})\]$`)
 
 // literalReaderImpl satisfies imap.LiteralReader with a fixed size.
 type literalReaderImpl struct {
@@ -248,8 +251,12 @@ func TestEmailOutboundPipeline(t *testing.T) {
 		if !strings.Contains(body, "Date: ") {
 			t.Errorf("SMTP body missing Date header:\n%s", body)
 		}
-		if !strings.Contains(body, "Message-ID: <") {
+		if !strings.Contains(strings.ToLower(body), "message-id: <") {
 			t.Errorf("SMTP body missing Message-ID header:\n%s", body)
+		}
+		subject := extractSubjectFromSMTPBody(t, body)
+		if !subjectHexSuffixRe.MatchString(subject) {
+			t.Errorf("outbound subject = %q, want match for %q (unique suffix required for new-conversation emails)", subject, subjectHexSuffixRe.String())
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timeout: SMTP capture received nothing")
@@ -341,7 +348,7 @@ func TestEmailReplyThreading(t *testing.T) {
 		if !strings.Contains(body, "References: "+msgIDHeader) {
 			t.Errorf("SMTP body missing References header:\n%s", body)
 		}
-		if !strings.Contains(body, "Message-ID: <") {
+		if !strings.Contains(strings.ToLower(body), "message-id: <") {
 			t.Errorf("SMTP body missing Message-ID header:\n%s", body)
 		}
 	case <-time.After(5 * time.Second):
@@ -427,7 +434,7 @@ func TestEmailNewEmail_ThreadReply(t *testing.T) {
 		if !strings.Contains(body, "References: "+msgIDHeader) {
 			t.Errorf("SMTP body missing References:\n%s", body)
 		}
-		if !strings.Contains(body, "Message-ID: <") {
+		if !strings.Contains(strings.ToLower(body), "message-id: <") {
 			t.Errorf("SMTP body missing Message-ID header:\n%s", body)
 		}
 	case <-time.After(5 * time.Second):
@@ -589,17 +596,17 @@ func TestEmailNewEmail_FreshThread(t *testing.T) {
 }
 
 // extractMessageIDFromBody parses the Message-ID header value from raw SMTP body.
+// The header name is matched case-insensitively (RFC 5322 headers are case-insensitive).
 func extractMessageIDFromBody(t *testing.T, body string) string {
 	t.Helper()
 	for _, line := range strings.Split(body, "\r\n") {
-		if strings.HasPrefix(line, "Message-ID: ") {
-			return strings.Trim(line[len("Message-ID: "):], " <>")
+		if strings.HasPrefix(strings.ToLower(line), "message-id: ") {
+			return strings.Trim(line[12:], " <>")
 		}
 	}
-	// Also try \n line endings
 	for _, line := range strings.Split(body, "\n") {
-		if strings.HasPrefix(line, "Message-ID: ") {
-			return strings.Trim(line[len("Message-ID: "):], " <>")
+		if strings.HasPrefix(strings.ToLower(line), "message-id: ") {
+			return strings.Trim(line[12:], " <>")
 		}
 	}
 	return ""

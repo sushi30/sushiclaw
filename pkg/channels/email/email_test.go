@@ -534,7 +534,7 @@ func TestSend_ReplyThreadingHeaders(t *testing.T) {
 			wantReferences:   "References: <first@test.com> <orig@test.com>",
 		},
 		{
-			name:             "no ReplyToMessageID — no threading headers",
+			name:             "no ReplyToMessageID — no threading headers, subject has unique suffix",
 			cachedSubject:    "Hello Agent",
 			replyToMessageID: "",
 			wantNoThreading:  true,
@@ -584,7 +584,7 @@ func TestSend_ReplyThreadingHeaders(t *testing.T) {
 
 			select {
 			case body := <-received:
-				if !strings.Contains(body, "Message-ID: <") {
+				if !strings.Contains(strings.ToLower(body), "message-id: <") {
 					t.Errorf("expected Message-ID header in outbound:\n%s", body)
 				}
 				if !strings.Contains(body, "Date: ") {
@@ -596,6 +596,11 @@ func TestSend_ReplyThreadingHeaders(t *testing.T) {
 					}
 					if strings.Contains(body, "References:") {
 						t.Errorf("expected no References header, got:\n%s", body)
+					}
+					subject := extractSubjectFromSMTPBody(t, body)
+					m := subjectHexSuffixRe.FindStringSubmatch(subject)
+					if m == nil {
+						t.Errorf("new-conversation subject = %q, want match for %q", subject, subjectHexSuffixRe.String())
 					}
 					return
 				}
@@ -609,6 +614,191 @@ func TestSend_ReplyThreadingHeaders(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSend_NewConversation_UniqueSubject(t *testing.T) {
+	smtp1Host, smtp1Port, received1 := startSMTPCapture(t)
+	smtp1PortInt, _ := strconv.Atoi(smtp1Port)
+
+	smtp2Host, smtp2Port, received2 := startSMTPCapture(t)
+	smtp2PortInt, _ := strconv.Atoi(smtp2Port)
+
+	msgBus := bus.NewMessageBus()
+
+	cfg1 := EmailConfig{
+		SMTPHost:       smtp1Host,
+		SMTPPort:       smtp1PortInt,
+		SMTPFrom:       *config.NewSecureString("bot@test.com"),
+		DefaultSubject: "Message",
+		IMAPHost:       "127.0.0.1",
+		IMAPPort:       10143,
+		IMAPUser:       *config.NewSecureString("u"),
+		IMAPPassword:   *config.NewSecureString("p"),
+	}
+
+	cfg2 := EmailConfig{
+		SMTPHost:       smtp2Host,
+		SMTPPort:       smtp2PortInt,
+		SMTPFrom:       *config.NewSecureString("bot@test.com"),
+		DefaultSubject: "Message",
+		IMAPHost:       "127.0.0.1",
+		IMAPPort:       10144,
+		IMAPUser:       *config.NewSecureString("u"),
+		IMAPPassword:   *config.NewSecureString("p"),
+	}
+
+	ch1, err := NewEmailChannel(cfg1, msgBus)
+	if err != nil {
+		t.Fatalf("NewEmailChannel: %v", err)
+	}
+	ch1.SetRunning(true)
+
+	ch2, err := NewEmailChannel(cfg2, msgBus)
+	if err != nil {
+		t.Fatalf("NewEmailChannel: %v", err)
+	}
+	ch2.SetRunning(true)
+
+	// First Send with empty ReplyToMessageID
+	_, err = ch1.Send(context.Background(), bus.OutboundMessage{
+		ChatID:  "user@example.com",
+		Content: "First new conversation",
+	})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	// Second Send with empty ReplyToMessageID
+	_, err = ch2.Send(context.Background(), bus.OutboundMessage{
+		ChatID:  "user@example.com",
+		Content: "Second new conversation",
+	})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	var body1, body2 string
+	select {
+	case body1 = <-received1:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout: SMTP capture received nothing for first message")
+	}
+
+	select {
+	case body2 = <-received2:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout: SMTP capture received nothing for second message")
+	}
+
+	// Extract subject lines
+	subject1 := extractSubjectFromSMTPBody(t, body1)
+	subject2 := extractSubjectFromSMTPBody(t, body2)
+
+	// Both subjects should match "Message [xxxxxxxx]" pattern
+	m1 := subjectHexSuffixRe.FindStringSubmatch(subject1)
+	if m1 == nil {
+		t.Errorf("subject1 = %q, want match for %q", subject1, subjectHexSuffixRe.String())
+	}
+	m2 := subjectHexSuffixRe.FindStringSubmatch(subject2)
+	if m2 == nil {
+		t.Errorf("subject2 = %q, want match for %q", subject2, subjectHexSuffixRe.String())
+	}
+
+	// Subjects should be different
+	if subject1 == subject2 {
+		t.Errorf("two new-conversation emails should have different subjects, both = %q", subject1)
+	}
+
+	// The suffix should match the first 8 chars of the Message-ID hex portion
+	mid1 := extractMessageIDFromBody(t, body1)
+	if m1 != nil && len(mid1) >= 8 {
+		expectedSuffix := mid1[:8]
+		if m1[1] != expectedSuffix {
+			t.Errorf("subject suffix = %q, want first 8 chars of Message-ID %q = %q", m1[1], mid1, expectedSuffix)
+		}
+	}
+	mid2 := extractMessageIDFromBody(t, body2)
+	if m2 != nil && len(mid2) >= 8 {
+		expectedSuffix := mid2[:8]
+		if m2[1] != expectedSuffix {
+			t.Errorf("subject suffix = %q, want first 8 chars of Message-ID %q = %q", m2[1], mid2, expectedSuffix)
+		}
+	}
+
+	// No In-Reply-To or References headers on new-conversation emails
+	for _, b := range []string{body1, body2} {
+		if strings.Contains(b, "In-Reply-To:") {
+			t.Errorf("new-conversation email should not have In-Reply-To:\n%s", b)
+		}
+		if strings.Contains(b, "References:") {
+			t.Errorf("new-conversation email should not have References:\n%s", b)
+		}
+	}
+}
+
+func TestSend_ReplyDoesNotAddSuffix(t *testing.T) {
+	smtpHost, smtpPort, received := startSMTPCapture(t)
+	smtpPortInt, _ := strconv.Atoi(smtpPort)
+
+	msgBus := bus.NewMessageBus()
+	cfg := EmailConfig{
+		SMTPHost:       smtpHost,
+		SMTPPort:       smtpPortInt,
+		SMTPFrom:       *config.NewSecureString("bot@test.com"),
+		DefaultSubject: "Message",
+		IMAPHost:       "127.0.0.1",
+		IMAPPort:       10143,
+		IMAPUser:       *config.NewSecureString("u"),
+		IMAPPassword:   *config.NewSecureString("p"),
+	}
+
+	ch, err := NewEmailChannel(cfg, msgBus)
+	if err != nil {
+		t.Fatalf("NewEmailChannel: %v", err)
+	}
+	ch.SetRunning(true)
+
+	const origMsgID = "orig-suffix-test@test.com"
+	ch.threads.Store(origMsgID, threadInfo{
+		subject:    "Important Thread",
+		references: nil,
+		threadRoot: origMsgID,
+	})
+
+	_, err = ch.Send(context.Background(), bus.OutboundMessage{
+		ChatID:           "user@example.com",
+		Content:          "Replying to thread",
+		ReplyToMessageID: origMsgID,
+	})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	select {
+	case body := <-received:
+		subject := extractSubjectFromSMTPBody(t, body)
+		if subject != "Re: Important Thread" {
+			t.Errorf("reply subject = %q, want %q (no suffix on replies)", subject, "Re: Important Thread")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout: SMTP capture received nothing")
+	}
+}
+
+func extractSubjectFromSMTPBody(t *testing.T, body string) string {
+	t.Helper()
+	for _, line := range strings.Split(body, "\r\n") {
+		if strings.HasPrefix(line, "Subject: ") {
+			return strings.TrimPrefix(line, "Subject: ")
+		}
+	}
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(line, "Subject: ") {
+			return strings.TrimPrefix(line, "Subject: ")
+		}
+	}
+	t.Fatalf("no Subject header found in SMTP body:\n%s", body)
+	return ""
 }
 
 func TestProcessEmail_SkipsEmptyOrSenderlessMessages(t *testing.T) {

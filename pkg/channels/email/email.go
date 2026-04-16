@@ -43,20 +43,15 @@ type EmailConfig struct {
 	ReasoningChannelID string                     `json:"reasoning_channel_id"`
 }
 
-// threadInfo holds the metadata needed to construct threading headers for a reply.
-type threadInfo struct {
-	subject    string
-	references []string // Message-IDs (angle-bracketed) from the References header chain
-	threadRoot string   // root Message-ID (raw, no angle brackets) of the conversation thread
-}
-
 // EmailChannel implements the Channel interface using SMTP (outbound) and IMAP polling (inbound).
 type EmailChannel struct {
 	*channels.BaseChannel
-	config  EmailConfig
-	ctx     context.Context
-	cancel  context.CancelFunc
-	threads sync.Map // messageID (string) → threadInfo
+	config          EmailConfig
+	ctx             context.Context
+	cancel          context.CancelFunc
+	tm              *ThreadManager
+	tmMu            sync.RWMutex
+	lastMsgByChatID sync.Map // chatID/fromAddr (string) → most recent inbound messageID (string)
 }
 
 // NewEmailChannel creates a new email channel.
@@ -81,6 +76,7 @@ func NewEmailChannel(cfg EmailConfig, messageBus *bus.MessageBus) (*EmailChannel
 	return &EmailChannel{
 		BaseChannel: base,
 		config:      cfg,
+		tm:          NewThreadManager(),
 	}, nil
 }
 
@@ -139,24 +135,32 @@ func (c *EmailChannel) Send(ctx context.Context, msg bus.OutboundMessage) ([]str
 	outboundMsgID := generateMessageID(extractDomain(c.config.SMTPFrom.String()))
 	outboundMsgIDRaw := strings.Trim(outboundMsgID, "<>")
 
-	var parentRefs []string
-	var root string
-	if msg.ReplyToMessageID != "" {
-		if v, ok := c.threads.Load(msg.ReplyToMessageID); ok {
-			info := v.(threadInfo)
-			if info.subject != "" {
-				s := info.subject
-				if !strings.HasPrefix(strings.ToLower(s), "re: ") {
-					s = "Re: " + s
-				}
-				subject = s
-			}
-			parentRefs = info.references
-			root = info.threadRoot
+	// Resolve reply target: use explicit ReplyToMessageID or fall back to the last
+	// inbound from this chat. The picoclaw framework's default response path
+	// (PublishResponseIfNeeded) never sets ReplyToMessageID on outbound messages,
+	// so the fallback is the primary way threading works in practice.
+	replyToID := msg.ReplyToMessageID
+	if replyToID == "" {
+		if v, ok := c.lastMsgByChatID.Load(to); ok {
+			replyToID = v.(string)
 		}
 	}
 
-	if msg.ReplyToMessageID == "" && len(outboundMsgIDRaw) >= 8 {
+	var ancestorRefs []string
+	if replyToID != "" {
+		c.tmMu.RLock()
+		node, hasNode := c.tm.AllMessages[replyToID]
+		if hasNode {
+			ancestorRefs = c.tm.ReferencesChain(replyToID)
+			if !node.IsGhost && node.Subject != "" {
+				// Subject in ThreadManager is already stripped of Re:/Fwd: prefixes.
+				subject = "Re: " + node.Subject
+			}
+		}
+		c.tmMu.RUnlock()
+	}
+
+	if replyToID == "" && len(outboundMsgIDRaw) >= 8 {
 		subject = fmt.Sprintf("%s [%s]", subject, outboundMsgIDRaw[:8])
 	}
 
@@ -167,10 +171,10 @@ func (c *EmailChannel) Send(ctx context.Context, msg bus.OutboundMessage) ([]str
 	h.SetDate(time.Now())
 	h.SetMessageID(outboundMsgIDRaw)
 
-	if msg.ReplyToMessageID != "" {
-		h.SetMsgIDList("In-Reply-To", []string{msg.ReplyToMessageID})
-		refs := buildReferencesList(msg.ReplyToMessageID, parentRefs)
-		h.SetMsgIDList("References", refs)
+	if replyToID != "" {
+		h.SetMsgIDList("In-Reply-To", []string{replyToID})
+		allRefs := append(ancestorRefs, replyToID)
+		h.SetMsgIDList("References", allRefs)
 	}
 
 	var bodyBuf bytes.Buffer
@@ -222,24 +226,19 @@ func (c *EmailChannel) Send(ctx context.Context, msg bus.OutboundMessage) ([]str
 		}
 	}
 
-	// Store thread info for the outbound message so future inbound replies
-	// can trace back to this thread.
-	if root == "" && msg.ReplyToMessageID != "" {
-		root = msg.ReplyToMessageID
+	// Register outbound message so future inbound replies can trace the full chain.
+	var outboundRefsStr string
+	if replyToID != "" {
+		parts := make([]string, 0, len(ancestorRefs)+1)
+		for _, r := range ancestorRefs {
+			parts = append(parts, "<"+r+">")
+		}
+		parts = append(parts, "<"+replyToID+">")
+		outboundRefsStr = strings.Join(parts, " ")
 	}
-	if root == "" {
-		root = outboundMsgIDRaw
-	}
-	var outboundRefs []string
-	outboundRefs = append(outboundRefs, parentRefs...)
-	if msg.ReplyToMessageID != "" {
-		outboundRefs = append(outboundRefs, "<"+msg.ReplyToMessageID+">")
-	}
-	c.threads.Store(outboundMsgIDRaw, threadInfo{
-		subject:    subject,
-		references: outboundRefs,
-		threadRoot: root,
-	})
+	c.tmMu.Lock()
+	c.tm.ProcessHeaders(outboundMsgIDRaw, subject, replyToID, outboundRefsStr)
+	c.tmMu.Unlock()
 
 	logger.DebugCF("email", "Message sent", map[string]any{"to": to})
 	return nil, nil
@@ -402,7 +401,7 @@ func (c *EmailChannel) processEmail(ctx context.Context, envelope *imap.Envelope
 		return false, ""
 	}
 
-	plainText := extractPlainText(bodyLiteral)
+	plainText, references := extractBodyParts(bodyLiteral)
 	if strings.TrimSpace(plainText) == "" {
 		return false, ""
 	}
@@ -412,36 +411,21 @@ func (c *EmailChannel) processEmail(ctx context.Context, envelope *imap.Envelope
 		"subject": envelope.Subject,
 	})
 
-	root := threadRoot(envelope.InReplyTo)
-	if root != "" {
-		// If the In-Reply-To points to a message we sent, resolve to
-		// the original thread root so the agent continues the same session.
-		if v, ok := c.threads.Load(root); ok {
-			info := v.(threadInfo)
-			if info.threadRoot != "" {
-				root = info.threadRoot
-			}
-		}
-	}
-	if root == "" && envelope.MessageID != "" {
-		root = strings.Trim(envelope.MessageID, "<>")
-	}
-
-	if envelope.MessageID != "" {
-		// Normalize In-Reply-To to References: per RFC 5322 Section 3.6.4,
-		// if no References header is available, In-Reply-To provides the chain.
-		// The IMAP Envelope does not expose a References field, so we use In-Reply-To.
-		refs := normalizeMsgIDs(envelope.InReplyTo)
-		c.threads.Store(envelope.MessageID, threadInfo{
-			subject:    envelope.Subject,
-			references: refs,
-			threadRoot: root,
-		})
-	}
-
 	metadata := map[string]string{}
-	if root != "" {
-		metadata["reply_to_message_id"] = root
+	if envelope.MessageID != "" {
+		rawID := strings.Trim(envelope.MessageID, "<>")
+
+		inReplyTo := ""
+		if len(envelope.InReplyTo) > 0 {
+			inReplyTo = strings.Trim(envelope.InReplyTo[0], "<> ")
+		}
+
+		c.tmMu.Lock()
+		c.tm.ProcessHeaders(rawID, envelope.Subject, inReplyTo, references)
+		c.tmMu.Unlock()
+
+		c.lastMsgByChatID.Store(fromAddr, rawID)
+		metadata["reply_to_message_id"] = rawID
 	}
 
 	sender := bus.SenderInfo{
@@ -459,47 +443,6 @@ func (c *EmailChannel) processEmail(ctx context.Context, envelope *imap.Envelope
 	)
 
 	return true, plainText
-}
-
-// buildReferencesList returns a list of message IDs (without angle brackets)
-// for use with mail.Header.SetMsgIDList. The list contains the parent's
-// References chain followed by the immediate parent's Message-ID.
-func buildReferencesList(parentMsgID string, parentRefs []string) []string {
-	refs := make([]string, 0, len(parentRefs)+1)
-	for _, ref := range parentRefs {
-		refs = append(refs, strings.Trim(ref, " <>"))
-	}
-	refs = append(refs, strings.Trim(parentMsgID, " <>"))
-	return refs
-}
-
-// normalizeMsgIDs ensures all message IDs in a list are angle-bracketed.
-// go-imap/v2 returns In-Reply-To entries with angle brackets, but we
-// normalize to always include them for consistent References construction.
-func normalizeMsgIDs(ids []string) []string {
-	if len(ids) == 0 {
-		return nil
-	}
-	out := make([]string, len(ids))
-	for i, id := range ids {
-		id = strings.TrimSpace(id)
-		if id != "" && !strings.HasPrefix(id, "<") {
-			id = "<" + id + ">"
-		}
-		out[i] = id
-	}
-	return out
-}
-
-// threadRoot extracts the first message ID from an In-Reply-To header list,
-// stripping angle brackets if present. Returns empty string if none.
-func threadRoot(inReplyTo []string) string {
-	if len(inReplyTo) == 0 {
-		return ""
-	}
-	first := inReplyTo[0]
-	first = strings.Trim(first, " <>")
-	return first
 }
 
 // generateMessageID creates a unique RFC 5322 Message-ID in the form <hex@domain>.
@@ -538,19 +481,22 @@ func displayName(env *imap.Envelope) string {
 	return extractFrom(env)
 }
 
-// extractPlainText reads the message body and returns the first text/plain part.
-// If only HTML is available, it extracts visible text from text/html instead.
-// Falls back to the raw body if parsing fails.
-func extractPlainText(r io.Reader) string {
+// extractBodyParts reads the MIME message and returns the plain-text body and
+// the value of the References header (space-separated Message-IDs).
+// If only HTML is available it falls back to stripping the HTML for the text.
+func extractBodyParts(r io.Reader) (text, references string) {
 	raw, err := io.ReadAll(r)
 	if err != nil {
-		return ""
+		return "", ""
 	}
 
 	mr, err := gomail.CreateReader(bytes.NewReader(raw))
 	if err != nil {
-		return strings.TrimSpace(string(raw))
+		return strings.TrimSpace(string(raw)), ""
 	}
+
+	// Extract References from the top-level message header.
+	references, _ = mr.Header.Text("References")
 
 	var htmlFallback string
 
@@ -569,9 +515,9 @@ func extractPlainText(r io.Reader) string {
 		ct, _, _ := inlineHeader.ContentType()
 		if ct == "text/plain" || ct == "" {
 			b, _ := io.ReadAll(p.Body)
-			text := strings.TrimSpace(string(b))
-			if text != "" {
-				return text
+			t := strings.TrimSpace(string(b))
+			if t != "" {
+				return t, references
 			}
 			continue
 		}
@@ -582,10 +528,10 @@ func extractPlainText(r io.Reader) string {
 	}
 
 	if htmlFallback != "" {
-		return htmlFallback
+		return htmlFallback, references
 	}
 
-	return ""
+	return "", references
 }
 
 func stripHTMLText(src string) string {

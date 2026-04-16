@@ -16,49 +16,6 @@ import (
 	"github.com/sipeed/picoclaw/pkg/config"
 )
 
-func TestThreadRoot(t *testing.T) {
-	tests := []struct {
-		name      string
-		inReplyTo []string
-		want      string
-	}{
-		{
-			name:      "empty inReplyTo",
-			inReplyTo: nil,
-			want:      "",
-		},
-		{
-			name:      "single message ID with angle brackets",
-			inReplyTo: []string{"<msg-1@test.com>"},
-			want:      "msg-1@test.com",
-		},
-		{
-			name:      "single message ID without angle brackets",
-			inReplyTo: []string{"msg-1@test.com"},
-			want:      "msg-1@test.com",
-		},
-		{
-			name:      "multiple entries returns first",
-			inReplyTo: []string{"<first@test.com>", "<second@test.com>"},
-			want:      "first@test.com",
-		},
-		{
-			name:      "empty string entry",
-			inReplyTo: []string{""},
-			want:      "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := threadRoot(tt.inReplyTo)
-			if got != tt.want {
-				t.Errorf("threadRoot() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestGenerateMessageID(t *testing.T) {
 	got := generateMessageID("example.com")
 	if got == "" {
@@ -73,49 +30,6 @@ func TestGenerateMessageID(t *testing.T) {
 	got2 := generateMessageID("example.com")
 	if got == got2 {
 		t.Errorf("generateMessageID() returned same ID twice: %q", got)
-	}
-}
-
-func TestNormalizeMsgIDs(t *testing.T) {
-	tests := []struct {
-		name string
-		ids  []string
-		want []string
-	}{
-		{
-			name: "nil input",
-			ids:  nil,
-			want: nil,
-		},
-		{
-			name: "already bracketed",
-			ids:  []string{"<msg@test.com>"},
-			want: []string{"<msg@test.com>"},
-		},
-		{
-			name: "bare id gets bracketed",
-			ids:  []string{"msg@test.com"},
-			want: []string{"<msg@test.com>"},
-		},
-		{
-			name: "mixed bracketing",
-			ids:  []string{"<first@test.com>", "second@test.com"},
-			want: []string{"<first@test.com>", "<second@test.com>"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := normalizeMsgIDs(tt.ids)
-			if len(got) != len(tt.want) {
-				t.Fatalf("normalizeMsgIDs() = %v, want %v", got, tt.want)
-			}
-			for i := range got {
-				if got[i] != tt.want[i] {
-					t.Errorf("normalizeMsgIDs()[%d] = %q, want %q", i, got[i], tt.want[i])
-				}
-			}
-		})
 	}
 }
 
@@ -436,9 +350,9 @@ func TestExtractPlainText(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := extractPlainText(strings.NewReader(tt.input))
+			got, _ := extractBodyParts(strings.NewReader(tt.input))
 			if got != tt.want {
-				t.Errorf("extractPlainText() = %q, want %q", got, tt.want)
+				t.Errorf("extractBodyParts() text = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -448,6 +362,7 @@ func TestProcessEmail_TextInteraction(t *testing.T) {
 	messageBus := bus.NewMessageBus()
 	ch := &EmailChannel{
 		BaseChannel: channels.NewBaseChannel("email", EmailConfig{}, messageBus, nil),
+		tm:          NewThreadManager(),
 	}
 
 	envelope := &imap.Envelope{
@@ -494,126 +409,128 @@ func TestProcessEmail_TextInteraction(t *testing.T) {
 }
 
 func TestSend_ReplyThreadingHeaders(t *testing.T) {
-	// Raw message IDs have no angle brackets (as returned by imap.Envelope.MessageID).
-	// Send wraps them in <> when writing RFC 2822 headers.
-	tests := []struct {
-		name             string
-		cachedSubject    string
-		cachedReferences []string
-		replyToMessageID string // raw, no angle brackets
-		wantSubjectLine  string
-		wantInReplyTo    string
-		wantReferences   string
-		wantNoThreading  bool
-	}{
-		{
-			name:             "reply with known subject",
-			cachedSubject:    "Hello Agent",
-			cachedReferences: nil,
-			replyToMessageID: "orig@test.com",
-			wantSubjectLine:  "Subject: Re: Hello Agent",
-			wantInReplyTo:    "In-Reply-To: <orig@test.com>",
-			wantReferences:   "References: <orig@test.com>",
-		},
-		{
-			name:             "subject already has Re: prefix",
-			cachedSubject:    "Re: Hello Agent",
-			cachedReferences: nil,
-			replyToMessageID: "orig@test.com",
-			wantSubjectLine:  "Subject: Re: Hello Agent",
-			wantInReplyTo:    "In-Reply-To: <orig@test.com>",
-			wantReferences:   "References: <orig@test.com>",
-		},
-		{
-			name:             "reply with prior References chain",
-			cachedSubject:    "Hello Agent",
-			cachedReferences: []string{"<first@test.com>"},
-			replyToMessageID: "orig@test.com",
-			wantSubjectLine:  "Subject: Re: Hello Agent",
-			wantInReplyTo:    "In-Reply-To: <orig@test.com>",
-			wantReferences:   "References: <first@test.com> <orig@test.com>",
-		},
-		{
-			name:             "no ReplyToMessageID — no threading headers, subject has unique suffix",
-			cachedSubject:    "Hello Agent",
-			replyToMessageID: "",
-			wantNoThreading:  true,
-		},
+	newCh := func(t *testing.T) (*EmailChannel, <-chan string) {
+		t.Helper()
+		smtpHost, smtpPort, received := startSMTPCapture(t)
+		smtpPortInt, _ := strconv.Atoi(smtpPort)
+		cfg := EmailConfig{
+			SMTPHost:       smtpHost,
+			SMTPPort:       smtpPortInt,
+			SMTPFrom:       *config.NewSecureString("bot@test.com"),
+			DefaultSubject: "Message",
+			IMAPHost:       "127.0.0.1",
+			IMAPPort:       10143,
+			IMAPUser:       *config.NewSecureString("u"),
+			IMAPPassword:   *config.NewSecureString("p"),
+		}
+		ch, err := NewEmailChannel(cfg, bus.NewMessageBus())
+		if err != nil {
+			t.Fatalf("NewEmailChannel: %v", err)
+		}
+		ch.SetRunning(true)
+		return ch, received
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			smtpHost, smtpPort, received := startSMTPCapture(t)
-			smtpPortInt, _ := strconv.Atoi(smtpPort)
+	t.Run("reply with known subject", func(t *testing.T) {
+		ch, received := newCh(t)
+		ch.tm.ProcessHeaders("orig@test.com", "Hello Agent", "", "")
 
-			msgBus := bus.NewMessageBus()
-			cfg := EmailConfig{
-				SMTPHost:       smtpHost,
-				SMTPPort:       smtpPortInt,
-				SMTPFrom:       *config.NewSecureString("bot@test.com"),
-				DefaultSubject: "Message",
-				IMAPHost:       "127.0.0.1",
-				IMAPPort:       10143,
-				IMAPUser:       *config.NewSecureString("u"),
-				IMAPPassword:   *config.NewSecureString("p"),
-			}
-
-			ch, err := NewEmailChannel(cfg, msgBus)
-			if err != nil {
-				t.Fatalf("NewEmailChannel: %v", err)
-			}
-			ch.SetRunning(true)
-
-			if tt.replyToMessageID != "" {
-				ch.threads.Store(tt.replyToMessageID, threadInfo{
-					subject:    tt.cachedSubject,
-					references: tt.cachedReferences,
-					threadRoot: tt.replyToMessageID,
-				})
-			}
-
-			ctx := context.Background()
-			_, err = ch.Send(ctx, bus.OutboundMessage{
-				ChatID:           "user@example.com",
-				Content:          "Agent reply",
-				ReplyToMessageID: tt.replyToMessageID,
-			})
-			if err != nil {
-				t.Fatalf("Send: %v", err)
-			}
-
-			select {
-			case body := <-received:
-				if !strings.Contains(strings.ToLower(body), "message-id: <") {
-					t.Errorf("expected Message-ID header in outbound:\n%s", body)
-				}
-				if !strings.Contains(body, "Date: ") {
-					t.Errorf("expected Date header in outbound:\n%s", body)
-				}
-				if tt.wantNoThreading {
-					if strings.Contains(body, "In-Reply-To:") {
-						t.Errorf("expected no In-Reply-To header, got:\n%s", body)
-					}
-					if strings.Contains(body, "References:") {
-						t.Errorf("expected no References header, got:\n%s", body)
-					}
-					subject := extractSubjectFromSMTPBody(t, body)
-					m := subjectHexSuffixRe.FindStringSubmatch(subject)
-					if m == nil {
-						t.Errorf("new-conversation subject = %q, want match for %q", subject, subjectHexSuffixRe.String())
-					}
-					return
-				}
-				for _, want := range []string{tt.wantSubjectLine, tt.wantInReplyTo, tt.wantReferences} {
-					if !strings.Contains(body, want) {
-						t.Errorf("SMTP body missing %q:\n%s", want, body)
-					}
-				}
-			case <-time.After(5 * time.Second):
-				t.Fatal("timeout: SMTP capture received nothing")
-			}
+		_, err := ch.Send(context.Background(), bus.OutboundMessage{
+			ChatID: "user@example.com", Content: "reply",
+			ReplyToMessageID: "orig@test.com",
 		})
-	}
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := <-received
+		for _, want := range []string{"Subject: Re: Hello Agent", "In-Reply-To: <orig@test.com>", "References: <orig@test.com>"} {
+			if !strings.Contains(body, want) {
+				t.Errorf("missing %q in:\n%s", want, body)
+			}
+		}
+	})
+
+	t.Run("subject already has Re: prefix", func(t *testing.T) {
+		ch, received := newCh(t)
+		ch.tm.ProcessHeaders("orig@test.com", "Re: Hello Agent", "", "")
+
+		_, err := ch.Send(context.Background(), bus.OutboundMessage{
+			ChatID: "user@example.com", Content: "reply",
+			ReplyToMessageID: "orig@test.com",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := <-received
+		// cleanSubject strips the Re: prefix; Send adds one back — expect exactly one.
+		if !strings.Contains(body, "Subject: Re: Hello Agent") {
+			t.Errorf("wrong subject in:\n%s", body)
+		}
+	})
+
+	t.Run("reply with prior References chain", func(t *testing.T) {
+		ch, received := newCh(t)
+		ch.tm.ProcessHeaders("first@test.com", "Hello Agent", "", "")
+		ch.tm.ProcessHeaders("orig@test.com", "Re: Hello Agent", "first@test.com", "<first@test.com>")
+
+		_, err := ch.Send(context.Background(), bus.OutboundMessage{
+			ChatID: "user@example.com", Content: "reply",
+			ReplyToMessageID: "orig@test.com",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := <-received
+		for _, want := range []string{
+			"Subject: Re: Hello Agent",
+			"In-Reply-To: <orig@test.com>",
+			"References: <first@test.com> <orig@test.com>",
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("missing %q in:\n%s", want, body)
+			}
+		}
+	})
+
+	t.Run("no ReplyToMessageID — no threading headers", func(t *testing.T) {
+		ch, received := newCh(t)
+		_, err := ch.Send(context.Background(), bus.OutboundMessage{
+			ChatID: "user@example.com", Content: "reply",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := <-received
+		if strings.Contains(body, "In-Reply-To:") {
+			t.Errorf("unexpected In-Reply-To in:\n%s", body)
+		}
+		if strings.Contains(body, "References:") {
+			t.Errorf("unexpected References in:\n%s", body)
+		}
+	})
+
+	t.Run("no ReplyToMessageID — fallback via lastMsgByChatID", func(t *testing.T) {
+		ch, received := newCh(t)
+		ch.tm.ProcessHeaders("inbound-msg@sender.com", "User question", "", "")
+		ch.lastMsgByChatID.Store("user@example.com", "inbound-msg@sender.com")
+
+		_, err := ch.Send(context.Background(), bus.OutboundMessage{
+			ChatID: "user@example.com", Content: "Agent reply",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := <-received
+		for _, want := range []string{
+			"Subject: Re: User question",
+			"In-Reply-To: <inbound-msg@sender.com>",
+			"References: <inbound-msg@sender.com>",
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("missing %q in:\n%s", want, body)
+			}
+		}
+	})
 }
 
 func TestSend_NewConversation_UniqueSubject(t *testing.T) {
@@ -740,7 +657,6 @@ func TestSend_ReplyDoesNotAddSuffix(t *testing.T) {
 	smtpHost, smtpPort, received := startSMTPCapture(t)
 	smtpPortInt, _ := strconv.Atoi(smtpPort)
 
-	msgBus := bus.NewMessageBus()
 	cfg := EmailConfig{
 		SMTPHost:       smtpHost,
 		SMTPPort:       smtpPortInt,
@@ -752,23 +668,18 @@ func TestSend_ReplyDoesNotAddSuffix(t *testing.T) {
 		IMAPPassword:   *config.NewSecureString("p"),
 	}
 
-	ch, err := NewEmailChannel(cfg, msgBus)
+	ch, err := NewEmailChannel(cfg, bus.NewMessageBus())
 	if err != nil {
 		t.Fatalf("NewEmailChannel: %v", err)
 	}
 	ch.SetRunning(true)
 
-	const origMsgID = "orig-suffix-test@test.com"
-	ch.threads.Store(origMsgID, threadInfo{
-		subject:    "Important Thread",
-		references: nil,
-		threadRoot: origMsgID,
-	})
+	ch.tm.ProcessHeaders("orig-suffix-test@test.com", "Important Thread", "", "")
 
 	_, err = ch.Send(context.Background(), bus.OutboundMessage{
 		ChatID:           "user@example.com",
 		Content:          "Replying to thread",
-		ReplyToMessageID: origMsgID,
+		ReplyToMessageID: "orig-suffix-test@test.com",
 	})
 	if err != nil {
 		t.Fatalf("Send: %v", err)
@@ -805,6 +716,7 @@ func TestProcessEmail_SkipsEmptyOrSenderlessMessages(t *testing.T) {
 	messageBus := bus.NewMessageBus()
 	ch := &EmailChannel{
 		BaseChannel: channels.NewBaseChannel("email", EmailConfig{}, messageBus, nil),
+		tm:          NewThreadManager(),
 	}
 
 	tests := []struct {

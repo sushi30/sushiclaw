@@ -500,7 +500,7 @@ func TestEmailReplyChain_ThreadContinuation(t *testing.T) {
 		t.Fatal("timeout: no inbound message")
 	}
 
-	// Step 2: Agent replies, which stores a threadInfo for the outbound Message-ID.
+	// Step 2: Agent replies, which registers the outbound Message-ID in the ThreadManager.
 	_, err = ch.Send(ctx, bus.OutboundMessage{
 		ChatID:           "human@example.com",
 		Content:          "Agent reply to original",
@@ -525,7 +525,7 @@ func TestEmailReplyChain_ThreadContinuation(t *testing.T) {
 
 	// Step 3: Simulate a human replying to the agent's outbound email.
 	// The human's email has In-Reply-To pointing to the agent's Message-ID.
-	// The threadInfo for agentMsgID should already be stored by Send().
+	// The ThreadManager entry for agentMsgID should already be stored by Send().
 	// We manually process this inbound reply (not via IMAP poll since we
 	// can't add more messages to the mock server easily).
 	humanReplyEnvelope := &imap.Envelope{
@@ -541,11 +541,13 @@ func TestEmailReplyChain_ThreadContinuation(t *testing.T) {
 		t.Fatal("expected processEmail to process human reply")
 	}
 
-	// Verify the inbound metadata points to the thread root (original message).
+	// Verify the inbound metadata points to the human reply's own Message-ID.
+	// The ThreadManager traces ancestry from any message, so the reply_to_message_id
+	// is simply the message's own ID — the agent can follow the chain from there.
 	select {
 	case msg := <-msgBus.InboundChan():
-		if msg.Metadata["reply_to_message_id"] != originalMsgID {
-			t.Errorf("human reply metadata[reply_to_message_id] = %q, want thread root %q", msg.Metadata["reply_to_message_id"], originalMsgID)
+		if msg.Metadata["reply_to_message_id"] != "human-reply-789@test.com" {
+			t.Errorf("human reply metadata[reply_to_message_id] = %q, want %q", msg.Metadata["reply_to_message_id"], "human-reply-789@test.com")
 		}
 	case <-ctx.Done():
 		t.Fatal("timeout: no inbound message from human reply")
@@ -563,13 +565,10 @@ func TestEmailNewEmail_FreshThread(t *testing.T) {
 	msgBus := bus.NewMessageBus()
 	ch := &EmailChannel{
 		BaseChannel: channels.NewBaseChannel("email", EmailConfig{}, msgBus, nil),
+		tm:          NewThreadManager(),
 	}
-	// Seed the threads map with thread A info.
-	ch.threads.Store(threadAMsgID, threadInfo{
-		subject:    "Thread A Subject",
-		references: nil,
-		threadRoot: threadAMsgID,
-	})
+	// Seed the ThreadManager with thread A info.
+	ch.tm.ProcessHeaders(threadAMsgID, "Thread A Subject", "", "")
 
 	// Send a fresh email with a completely different Message-ID and no In-Reply-To.
 	freshEnvelope := &imap.Envelope{

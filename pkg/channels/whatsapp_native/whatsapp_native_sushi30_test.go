@@ -3,6 +3,7 @@ package whatsapp
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -427,6 +428,117 @@ func TestHandleIncoming_ListResponse_Forwarded(t *testing.T) {
 	}
 	if msg.Metadata["wa_reply_type"] != "button" {
 		t.Errorf("wa_reply_type: got %q, want %q", msg.Metadata["wa_reply_type"], "button")
+	}
+}
+
+// --- Contact card tests ---
+
+func TestHandleIncoming_ContactMessage_Forwarded(t *testing.T) {
+	ch, mb := makeTestChannel(nil)
+
+	vcard := "BEGIN:VCARD\nVERSION:3.0\nFN:John Doe\nTEL;type=CELL;waid=972501234567:+972 50-123-4567\nEMAIL:john@example.com\nORG:ACME Corp\nEND:VCARD"
+	evt := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Sender: types.NewJID("1001", types.DefaultUserServer),
+				Chat:   types.NewJID("1001", types.DefaultUserServer),
+			},
+			ID:        "mid-contact",
+			PushName:  "John",
+			Timestamp: time.Now().Add(1 * time.Second),
+		},
+		Message: &waE2E.Message{
+			ContactMessage: &waE2E.ContactMessage{
+				DisplayName: proto.String("John Doe"),
+				Vcard:       proto.String(vcard),
+			},
+		},
+	}
+
+	ch.handleIncoming(evt)
+
+	msg := receiveInbound(t, mb)
+	if !strings.Contains(msg.Content, "[Contact Card: John Doe]") {
+		t.Errorf("expected [Contact Card: John Doe] in content, got: %q", msg.Content)
+	}
+	if !strings.Contains(msg.Content, "Phone:") {
+		t.Errorf("expected Phone: in content, got: %q", msg.Content)
+	}
+	if !strings.Contains(msg.Content, "Email:") {
+		t.Errorf("expected Email: in content, got: %q", msg.Content)
+	}
+	if msg.Metadata["wa_message_type"] != "contact" {
+		t.Errorf("wa_message_type: got %q, want %q", msg.Metadata["wa_message_type"], "contact")
+	}
+}
+
+func TestHandleIncoming_ContactMessage_NoVCard_Forwarded(t *testing.T) {
+	ch, mb := makeTestChannel(nil)
+
+	evt := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Sender: types.NewJID("1001", types.DefaultUserServer),
+				Chat:   types.NewJID("1001", types.DefaultUserServer),
+			},
+			ID:        "mid-contact-novcard",
+			Timestamp: time.Now().Add(1 * time.Second),
+		},
+		Message: &waE2E.Message{
+			ContactMessage: &waE2E.ContactMessage{
+				DisplayName: proto.String("Jane"),
+			},
+		},
+	}
+
+	ch.handleIncoming(evt)
+
+	msg := receiveInbound(t, mb)
+	if msg.Content != "[Contact Card: Jane]" {
+		t.Errorf("expected content %q, got %q", "[Contact Card: Jane]", msg.Content)
+	}
+	if msg.Metadata["wa_message_type"] != "contact" {
+		t.Errorf("wa_message_type: got %q, want %q", msg.Metadata["wa_message_type"], "contact")
+	}
+}
+
+func TestHandleIncoming_ContactsArrayMessage_Forwarded(t *testing.T) {
+	ch, mb := makeTestChannel(nil)
+
+	evt := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Sender: types.NewJID("1001", types.DefaultUserServer),
+				Chat:   types.NewJID("1001", types.DefaultUserServer),
+			},
+			ID:        "mid-contacts-array",
+			Timestamp: time.Now().Add(1 * time.Second),
+		},
+		Message: &waE2E.Message{
+			ContactsArrayMessage: &waE2E.ContactsArrayMessage{
+				DisplayName: proto.String("My Contacts"),
+				Contacts: []*waE2E.ContactMessage{
+					{DisplayName: proto.String("Alice")},
+					{DisplayName: proto.String("Bob")},
+				},
+			},
+		},
+	}
+
+	ch.handleIncoming(evt)
+
+	msg := receiveInbound(t, mb)
+	if !strings.Contains(msg.Content, "[Contact Cards: 2]") {
+		t.Errorf("expected [Contact Cards: 2] in content, got: %q", msg.Content)
+	}
+	if !strings.Contains(msg.Content, "Alice") {
+		t.Errorf("expected Alice in content, got: %q", msg.Content)
+	}
+	if !strings.Contains(msg.Content, "Bob") {
+		t.Errorf("expected Bob in content, got: %q", msg.Content)
+	}
+	if msg.Metadata["wa_message_type"] != "contact" {
+		t.Errorf("wa_message_type: got %q, want %q", msg.Metadata["wa_message_type"], "contact")
 	}
 }
 

@@ -375,6 +375,7 @@ func (c *WhatsAppNativeChannel) handleIncoming(evt *events.Message) {
 	}
 
 	// Extract caption from media sub-messages when there is no plain-text body.
+	var waMessageType string
 	if content == "" {
 		switch {
 		case evt.Message.GetImageMessage() != nil:
@@ -383,6 +384,12 @@ func (c *WhatsAppNativeChannel) handleIncoming(evt *events.Message) {
 			content = evt.Message.GetVideoMessage().GetCaption()
 		case evt.Message.GetDocumentMessage() != nil:
 			content = evt.Message.GetDocumentMessage().GetCaption()
+		case evt.Message.GetContactMessage() != nil:
+			content = formatContactContent(evt.Message.GetContactMessage())
+			waMessageType = "contact"
+		case evt.Message.GetContactsArrayMessage() != nil:
+			content = formatContactsArrayContent(evt.Message.GetContactsArrayMessage())
+			waMessageType = "contact"
 		}
 	}
 
@@ -444,6 +451,9 @@ func (c *WhatsAppNativeChannel) handleIncoming(evt *events.Message) {
 	metadata := make(map[string]string)
 	if waReplyType != "" {
 		metadata["wa_reply_type"] = waReplyType
+	}
+	if waMessageType != "" {
+		metadata["wa_message_type"] = waMessageType
 	}
 	metadata["message_id"] = evt.Info.ID
 	if evt.Info.PushName != "" {
@@ -567,6 +577,81 @@ func mediaFilenameAndMIME(msg *waE2E.Message) (filename, mimetype string) {
 		return "sticker.webp", mime
 	}
 	return "media", "application/octet-stream"
+}
+
+// parseVCard extracts the first FN, TEL, EMAIL, and ORG values from a vCard string.
+func parseVCard(vcard string) map[string]string {
+	result := make(map[string]string)
+	for _, line := range strings.Split(vcard, "\n") {
+		line = strings.TrimRight(line, "\r")
+		idx := strings.Index(line, ":")
+		if idx < 0 {
+			continue
+		}
+		fieldSpec := strings.ToUpper(line[:idx])
+		value := strings.TrimSpace(line[idx+1:])
+		if value == "" {
+			continue
+		}
+		fieldName := strings.SplitN(fieldSpec, ";", 2)[0]
+		switch fieldName {
+		case "FN":
+			if result["fn"] == "" {
+				result["fn"] = value
+			}
+		case "TEL":
+			if result["tel"] == "" {
+				result["tel"] = value
+			}
+		case "EMAIL":
+			if result["email"] == "" {
+				result["email"] = value
+			}
+		case "ORG":
+			if result["org"] == "" {
+				result["org"] = value
+			}
+		}
+	}
+	return result
+}
+
+func formatContactContent(c *waE2E.ContactMessage) string {
+	name := c.GetDisplayName()
+	var parts []string
+	if vc := c.GetVcard(); vc != "" {
+		fields := parseVCard(vc)
+		if fn := fields["fn"]; fn != "" {
+			name = fn
+		}
+		if tel := fields["tel"]; tel != "" {
+			parts = append(parts, "Phone: "+tel)
+		}
+		if email := fields["email"]; email != "" {
+			parts = append(parts, "Email: "+email)
+		}
+		if org := fields["org"]; org != "" {
+			parts = append(parts, "Organization: "+org)
+		}
+	}
+	header := "[Contact Card: " + name + "]"
+	if len(parts) == 0 {
+		return header
+	}
+	return header + "\n" + strings.Join(parts, "\n")
+}
+
+func formatContactsArrayContent(ca *waE2E.ContactsArrayMessage) string {
+	contacts := ca.GetContacts()
+	if len(contacts) == 0 {
+		return "[Contact Cards]"
+	}
+	lines := make([]string, 0, len(contacts)+1)
+	lines = append(lines, fmt.Sprintf("[Contact Cards: %d]", len(contacts)))
+	for i, c := range contacts {
+		lines = append(lines, fmt.Sprintf("%d. %s", i+1, formatContactContent(c)))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (c *WhatsAppNativeChannel) Send(ctx context.Context, msg bus.OutboundMessage) ([]string, error) {

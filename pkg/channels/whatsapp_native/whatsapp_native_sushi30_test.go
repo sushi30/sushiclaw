@@ -542,6 +542,85 @@ func TestHandleIncoming_ContactsArrayMessage_Forwarded(t *testing.T) {
 	}
 }
 
+// --- Widget auto-detection integration tests ---
+
+func TestSend_OptionsAutoDetect_ButtonWidget(t *testing.T) {
+	msg := bus.OutboundMessage{
+		Content: "Which list?\n1. Backlog\n2. In Progress",
+	}
+	result := injectWidgetMetadata(msg)
+	waMsg := buildOutboundProtoMessage(result)
+
+	bm := waMsg.GetButtonsMessage()
+	if bm == nil {
+		t.Fatal("expected ButtonsMessage for 2-option list, got nil")
+	}
+	if len(bm.Buttons) != 2 {
+		t.Fatalf("expected 2 buttons, got %d", len(bm.Buttons))
+	}
+	if bm.Buttons[0].GetButtonText().GetDisplayText() != "Backlog" {
+		t.Errorf("button[0]: got %q, want %q", bm.Buttons[0].GetButtonText().GetDisplayText(), "Backlog")
+	}
+	if bm.Buttons[1].GetButtonText().GetDisplayText() != "In Progress" {
+		t.Errorf("button[1]: got %q, want %q", bm.Buttons[1].GetButtonText().GetDisplayText(), "In Progress")
+	}
+	if bm.GetContentText() != "Which list?" {
+		t.Errorf("body: got %q, want %q", bm.GetContentText(), "Which list?")
+	}
+}
+
+func TestSend_OptionsAutoDetect_ListWidget(t *testing.T) {
+	msg := bus.OutboundMessage{
+		Content: "Select a list?\n1. Backlog\n2. In Progress\n3. Done\n4. Archive",
+	}
+	result := injectWidgetMetadata(msg)
+	waMsg := buildOutboundProtoMessage(result)
+
+	lm := waMsg.GetListMessage()
+	if lm == nil {
+		t.Fatal("expected ListMessage for 4-option list, got nil")
+	}
+	if len(lm.Sections) != 1 || len(lm.Sections[0].Rows) != 4 {
+		t.Fatalf("expected 4 rows, got %d", len(lm.Sections[0].Rows))
+	}
+	labels := []string{"Backlog", "In Progress", "Done", "Archive"}
+	for i, row := range lm.Sections[0].Rows {
+		if row.GetTitle() != labels[i] {
+			t.Errorf("row[%d]: got %q, want %q", i, row.GetTitle(), labels[i])
+		}
+	}
+}
+
+func TestSend_ExistingContentType_NotOverridden(t *testing.T) {
+	msg := bus.OutboundMessage{
+		Content: "Which list?\n1. Backlog\n2. In Progress",
+		Metadata: map[string]string{
+			"Content-Type": "application/x-wa-list",
+			"X-WA-Body":    "manual body",
+			"X-WA-Option-0": "Custom A",
+			"X-WA-Option-1": "Custom B",
+		},
+	}
+	result := injectWidgetMetadata(msg)
+	if result.Metadata["X-WA-Body"] != "manual body" {
+		t.Errorf("existing Content-Type should not be overridden; X-WA-Body: got %q", result.Metadata["X-WA-Body"])
+	}
+}
+
+func TestSend_NoBodySuffix_NotDetected(t *testing.T) {
+	msg := bus.OutboundMessage{
+		Content: "Here are some items\n1. Alpha\n2. Beta",
+	}
+	result := injectWidgetMetadata(msg)
+	if result.Metadata["Content-Type"] != "" {
+		t.Errorf("expected no Content-Type for body without ?/: suffix, got %q", result.Metadata["Content-Type"])
+	}
+	waMsg := buildOutboundProtoMessage(result)
+	if waMsg.GetConversation() == "" {
+		t.Error("expected plain Conversation fallback")
+	}
+}
+
 func assertNoMessage(t *testing.T, mb *bus.MessageBus, msg string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)

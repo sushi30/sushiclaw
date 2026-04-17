@@ -33,15 +33,21 @@ func loadEmailConfig() (EmailConfig, error) {
 		return EmailConfig{}, nil // no config file = not enabled
 	}
 
+	// Try the new top-level "email_channel" key first (V3+ configs and new example format).
+	// Fall back to the legacy "channels"."email" location for backwards compat.
 	var raw struct {
-		Channels struct {
+		EmailChannel EmailConfig `json:"email_channel"`
+		Channels     struct {
 			Email EmailConfig `json:"email"`
 		} `json:"channels"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return EmailConfig{}, err
 	}
-	cfg := raw.Channels.Email
+	cfg := raw.EmailChannel
+	if !cfg.Enabled && raw.Channels.Email.Enabled {
+		cfg = raw.Channels.Email
+	}
 	if !cfg.Enabled {
 		return cfg, nil
 	}

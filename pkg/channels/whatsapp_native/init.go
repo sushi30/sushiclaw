@@ -9,12 +9,20 @@ import (
 )
 
 func init() {
-	channels.RegisterFactory("whatsapp_native", func(cfg *config.Config, b *bus.MessageBus) (channels.Channel, error) {
-		waCfg := cfg.Channels.WhatsApp
+	channels.RegisterFactory("whatsapp", func(channelName, _ string, cfg *config.Config, b *bus.MessageBus) (channels.Channel, error) {
+		bc := cfg.Channels[channelName]
+		decoded, err := bc.GetDecoded()
+		if err != nil {
+			return nil, err
+		}
+		waCfg, ok := decoded.(*config.WhatsAppSettings)
+		if !ok {
+			return nil, channels.ErrSendFailed
+		}
 		storePath := waCfg.SessionStorePath
 		if storePath == "" {
 			storePath = filepath.Join(cfg.WorkspacePath(), "whatsapp")
 		}
-		return NewWhatsAppNativeChannel(waCfg, cfg.Voice, b, storePath)
+		return NewWhatsAppNativeChannel(bc, waCfg, cfg.Voice, b, storePath)
 	})
 }

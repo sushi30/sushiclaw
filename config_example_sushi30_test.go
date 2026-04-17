@@ -40,28 +40,42 @@ func TestExampleConfigLoadsAsV2(t *testing.T) {
 	}
 
 	// WhatsApp: use_native should be set
-	if !cfg.Channels.WhatsApp.UseNative {
+	waDecoded, err := cfg.Channels["whatsapp"].GetDecoded()
+	if err != nil {
+		t.Fatalf("decode whatsapp settings: %v", err)
+	}
+	waCfg, ok := waDecoded.(*config.WhatsAppSettings)
+	if !ok {
+		t.Fatal("whatsapp settings wrong type")
+	}
+	if !waCfg.UseNative {
 		t.Error("whatsapp use_native should be true in example config")
 	}
 
 	// Telegram: streaming should be configured
-	if !cfg.Channels.Telegram.Streaming.Enabled {
+	tgDecoded, err := cfg.Channels["telegram"].GetDecoded()
+	if err != nil {
+		t.Fatalf("decode telegram settings: %v", err)
+	}
+	tgCfg, ok := tgDecoded.(*config.TelegramSettings)
+	if !ok {
+		t.Fatal("telegram settings wrong type")
+	}
+	if !tgCfg.Streaming.Enabled {
 		t.Error("telegram streaming.enabled should be true in example config")
 	}
 
 	// Email channel is owned by sushiclaw and not part of picoclaw's ChannelsConfig.
 	// Verify the section is present and parseable via raw JSON.
 	var raw struct {
-		Channels struct {
-			Email struct {
-				SMTPHost string `json:"smtp_host"`
-			} `json:"email"`
-		} `json:"channels"`
+		EmailChannel struct {
+			SMTPHost string `json:"smtp_host"`
+		} `json:"email_channel"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		t.Fatalf("parse email section: %v", err)
 	}
-	if raw.Channels.Email.SMTPHost == "" {
+	if raw.EmailChannel.SMTPHost == "" {
 		t.Error("email smtp_host missing from example config")
 	}
 }

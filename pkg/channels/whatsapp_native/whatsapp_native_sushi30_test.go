@@ -23,7 +23,7 @@ import (
 // (client stays nil, so DownloadAny is never called — suitable for text/caption tests).
 func makeTestChannel(store media.MediaStore) (*WhatsAppNativeChannel, *bus.MessageBus) {
 	mb := bus.NewMessageBus()
-	bc := channels.NewBaseChannel("whatsapp_native", config.WhatsAppConfig{}, mb, nil)
+	bc := channels.NewBaseChannel("whatsapp_native", config.WhatsAppSettings{}, mb, nil)
 	if store != nil {
 		bc.SetMediaStore(store)
 	}
@@ -225,13 +225,13 @@ func TestHandleIncoming_RecentMessage_Processed(t *testing.T) {
 func TestBuildOutboundProtoMessage_Buttons(t *testing.T) {
 	msg := bus.OutboundMessage{
 		Content: "fallback",
-		Metadata: map[string]string{
+		Context: bus.InboundContext{Raw: map[string]string{
 			"Content-Type":  "application/x-wa-buttons",
 			"X-WA-Body":     "Pick one:",
 			"X-WA-Option-0": "Alpha",
 			"X-WA-Option-1": "Beta",
 			"X-WA-Option-2": "Gamma",
-		},
+		}},
 	}
 	waMsg := buildOutboundProtoMessage(msg)
 
@@ -259,7 +259,7 @@ func TestBuildOutboundProtoMessage_Buttons(t *testing.T) {
 func TestBuildOutboundProtoMessage_ButtonsOverflow(t *testing.T) {
 	msg := bus.OutboundMessage{
 		Content: "fallback",
-		Metadata: map[string]string{
+		Context: bus.InboundContext{Raw: map[string]string{
 			"Content-Type":  "application/x-wa-buttons",
 			"X-WA-Body":     "Choose:",
 			"X-WA-Option-0": "One",
@@ -267,7 +267,7 @@ func TestBuildOutboundProtoMessage_ButtonsOverflow(t *testing.T) {
 			"X-WA-Option-2": "Three",
 			"X-WA-Option-3": "Four",
 			"X-WA-Option-4": "Five",
-		},
+		}},
 	}
 	waMsg := buildOutboundProtoMessage(msg)
 
@@ -292,14 +292,14 @@ func TestBuildOutboundProtoMessage_ButtonsOverflow(t *testing.T) {
 func TestBuildOutboundProtoMessage_List(t *testing.T) {
 	msg := bus.OutboundMessage{
 		Content: "fallback",
-		Metadata: map[string]string{
+		Context: bus.InboundContext{Raw: map[string]string{
 			"Content-Type":  "application/x-wa-list",
 			"X-WA-Body":     "Select a city:",
 			"X-WA-Option-0": "New York",
 			"X-WA-Option-1": "London",
 			"X-WA-Option-2": "Tokyo",
 			"X-WA-Option-3": "Sydney",
-		},
+		}},
 	}
 	waMsg := buildOutboundProtoMessage(msg)
 
@@ -348,10 +348,10 @@ func TestBuildOutboundProtoMessage_EmptyOptions(t *testing.T) {
 	// Content-Type set but no X-WA-Option-N → fall back to plain text.
 	msg := bus.OutboundMessage{
 		Content: "plain",
-		Metadata: map[string]string{
+		Context: bus.InboundContext{Raw: map[string]string{
 			"Content-Type": "application/x-wa-buttons",
 			"X-WA-Body":    "Choose:",
-		},
+		}},
 	}
 	waMsg := buildOutboundProtoMessage(msg)
 
@@ -392,8 +392,8 @@ func TestHandleIncoming_ButtonsResponse_Forwarded(t *testing.T) {
 	if msg.Content != "Book a flight" {
 		t.Errorf("content: got %q, want %q", msg.Content, "Book a flight")
 	}
-	if msg.Metadata["wa_reply_type"] != "button" {
-		t.Errorf("wa_reply_type: got %q, want %q", msg.Metadata["wa_reply_type"], "button")
+	if msg.Context.Raw["wa_reply_type"] != "button" {
+		t.Errorf("wa_reply_type: got %q, want %q", msg.Context.Raw["wa_reply_type"], "button")
 	}
 }
 
@@ -426,8 +426,8 @@ func TestHandleIncoming_ListResponse_Forwarded(t *testing.T) {
 	if msg.Content != "London" {
 		t.Errorf("content: got %q, want %q", msg.Content, "London")
 	}
-	if msg.Metadata["wa_reply_type"] != "button" {
-		t.Errorf("wa_reply_type: got %q, want %q", msg.Metadata["wa_reply_type"], "button")
+	if msg.Context.Raw["wa_reply_type"] != "button" {
+		t.Errorf("wa_reply_type: got %q, want %q", msg.Context.Raw["wa_reply_type"], "button")
 	}
 }
 
@@ -467,8 +467,8 @@ func TestHandleIncoming_ContactMessage_Forwarded(t *testing.T) {
 	if !strings.Contains(msg.Content, "Email:") {
 		t.Errorf("expected Email: in content, got: %q", msg.Content)
 	}
-	if msg.Metadata["wa_message_type"] != "contact" {
-		t.Errorf("wa_message_type: got %q, want %q", msg.Metadata["wa_message_type"], "contact")
+	if msg.Context.Raw["wa_message_type"] != "contact" {
+		t.Errorf("wa_message_type: got %q, want %q", msg.Context.Raw["wa_message_type"], "contact")
 	}
 }
 
@@ -497,8 +497,8 @@ func TestHandleIncoming_ContactMessage_NoVCard_Forwarded(t *testing.T) {
 	if msg.Content != "[Contact Card: Jane]" {
 		t.Errorf("expected content %q, got %q", "[Contact Card: Jane]", msg.Content)
 	}
-	if msg.Metadata["wa_message_type"] != "contact" {
-		t.Errorf("wa_message_type: got %q, want %q", msg.Metadata["wa_message_type"], "contact")
+	if msg.Context.Raw["wa_message_type"] != "contact" {
+		t.Errorf("wa_message_type: got %q, want %q", msg.Context.Raw["wa_message_type"], "contact")
 	}
 }
 
@@ -537,8 +537,8 @@ func TestHandleIncoming_ContactsArrayMessage_Forwarded(t *testing.T) {
 	if !strings.Contains(msg.Content, "Bob") {
 		t.Errorf("expected Bob in content, got: %q", msg.Content)
 	}
-	if msg.Metadata["wa_message_type"] != "contact" {
-		t.Errorf("wa_message_type: got %q, want %q", msg.Metadata["wa_message_type"], "contact")
+	if msg.Context.Raw["wa_message_type"] != "contact" {
+		t.Errorf("wa_message_type: got %q, want %q", msg.Context.Raw["wa_message_type"], "contact")
 	}
 }
 

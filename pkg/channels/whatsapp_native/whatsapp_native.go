@@ -49,7 +49,7 @@ const (
 // WhatsAppNativeChannel implements the WhatsApp channel using whatsmeow (in-process, no external bridge).
 type WhatsAppNativeChannel struct {
 	*channels.BaseChannel
-	config       config.WhatsAppConfig
+	config       *config.WhatsAppSettings
 	voiceConfig  config.VoiceConfig
 	storePath    string
 	client       *whatsmeow.Client
@@ -67,13 +67,15 @@ type WhatsAppNativeChannel struct {
 // NewWhatsAppNativeChannel creates a WhatsApp channel that uses whatsmeow for connection.
 // storePath is the directory for the SQLite session store (e.g. workspace/whatsapp).
 func NewWhatsAppNativeChannel(
-	cfg config.WhatsAppConfig,
+	bc *config.Channel,
+	cfg *config.WhatsAppSettings,
 	voiceCfg config.VoiceConfig,
 	bus *bus.MessageBus,
 	storePath string,
 ) (channels.Channel, error) {
-	base := channels.NewBaseChannel("whatsapp_native", cfg, bus, cfg.AllowFrom,
+	base := channels.NewBaseChannel(bc.Name(), cfg, bus, bc.AllowFrom,
 		channels.WithMaxMessageLength(65536),
+		channels.WithReasoningChannelID(bc.ReasoningChannelID),
 	)
 	if storePath == "" {
 		storePath = "whatsapp"
@@ -470,11 +472,10 @@ func (c *WhatsAppNativeChannel) handleIncoming(evt *events.Message) {
 		metadata["echo_transcription"] = "true"
 	}
 
-	peerKind := "direct"
+	chatType := "direct"
 	if evt.Info.Chat.Server == types.GroupServer {
-		peerKind = "group"
+		chatType = "group"
 	}
-	peer := bus.Peer{Kind: peerKind, ID: chatID}
 	messageID := evt.Info.ID
 	sender := bus.SenderInfo{
 		Platform:    "whatsapp",
@@ -491,7 +492,7 @@ func (c *WhatsAppNativeChannel) handleIncoming(evt *events.Message) {
 		)
 		_, _ = c.Send(
 			c.runCtx,
-			bus.OutboundMessage{Channel: "whatsapp", ChatID: chatID, Content: "You are not authorized to use this bot."},
+			bus.OutboundMessage{Channel: c.Name(), ChatID: chatID, Content: "You are not authorized to use this bot."},
 		)
 		return
 	}
@@ -530,7 +531,14 @@ func (c *WhatsAppNativeChannel) handleIncoming(evt *events.Message) {
 		content = cleaned
 	}
 
-	c.HandleMessage(c.runCtx, peer, messageID, senderID, chatID, content, mediaPaths, metadata, sender)
+	inboundCtx := bus.InboundContext{
+		ChatType:  chatType,
+		ChatID:    chatID,
+		SenderID:  senderID,
+		MessageID: messageID,
+		Raw:       metadata,
+	}
+	c.HandleMessageWithContext(c.runCtx, chatID, content, mediaPaths, inboundCtx, sender)
 }
 
 // mediaFilenameAndMIME returns a safe filename and MIME type for the media
@@ -734,15 +742,15 @@ func injectWidgetMetadata(msg bus.OutboundMessage) bus.OutboundMessage {
 // provided, the first 2 are kept and the rest are collapsed into a synthetic
 // "Other (chat about this)" button, respecting WhatsApp's hard 3-button limit.
 func buildOutboundProtoMessage(msg bus.OutboundMessage) *waE2E.Message {
-	ct := msg.Metadata["Content-Type"]
-	body := msg.Metadata["X-WA-Body"]
+	ct := msg.Context.Raw["Content-Type"]
+	body := msg.Context.Raw["X-WA-Body"]
 	if body == "" {
 		body = msg.Content
 	}
 
 	var opts []string
 	for i := 0; ; i++ {
-		v, ok := msg.Metadata[fmt.Sprintf("X-WA-Option-%d", i)]
+		v, ok := msg.Context.Raw[fmt.Sprintf("X-WA-Option-%d", i)]
 		if !ok {
 			break
 		}

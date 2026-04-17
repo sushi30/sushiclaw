@@ -399,11 +399,11 @@ func TestProcessEmail_TextInteraction(t *testing.T) {
 		if inbound.Content != "Hello from email" {
 			t.Fatalf("content=%q", inbound.Content)
 		}
-		if inbound.Metadata == nil {
+		if inbound.Context.Raw == nil {
 			t.Fatal("expected non-nil metadata")
 		}
-		if inbound.Metadata["reply_to_message_id"] != "mid-1" {
-			t.Errorf("metadata[reply_to_message_id] = %q, want %q", inbound.Metadata["reply_to_message_id"], "mid-1")
+		if inbound.Context.Raw["reply_to_message_id"] != "mid-1" {
+			t.Errorf("metadata[reply_to_message_id] = %q, want %q", inbound.Context.Raw["reply_to_message_id"], "mid-1")
 		}
 	}
 }

@@ -7,6 +7,7 @@ require github.com/sipeed/picoclaw v0.0.0-00010101000000-000000000000
 require (
 	github.com/emersion/go-imap/v2 v2.0.0-beta.8
 	github.com/emersion/go-message v0.18.2
+	github.com/gomarkdown/markdown v0.0.0-20260412113850-134a5b2cce7f
 	github.com/google/uuid v1.6.0
 	github.com/mdp/qrterminal/v3 v3.2.1
 	github.com/mymmrac/telego v1.7.0
@@ -54,7 +55,6 @@ require (
 	github.com/github/copilot-sdk/go v0.2.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/gomarkdown/markdown v0.0.0-20260217112301-37c66b85d6ab // indirect
 	github.com/google/jsonschema-go v0.4.2 // indirect
 	github.com/grbit/go-json v0.11.0 // indirect
 	github.com/h2non/filetype v1.1.3 // indirect

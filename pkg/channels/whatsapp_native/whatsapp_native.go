@@ -598,6 +598,7 @@ func (c *WhatsAppNativeChannel) Send(ctx context.Context, msg bus.OutboundMessag
 		return nil, fmt.Errorf("invalid chat id %q: %w", msg.ChatID, err)
 	}
 
+	msg.Content = stripMarkdown(msg.Content)
 	waMsg := buildOutboundProtoMessage(msg)
 
 	if _, err = client.SendMessage(ctx, to, waMsg); err != nil {

@@ -177,12 +177,15 @@ func (c *EmailChannel) Send(ctx context.Context, msg bus.OutboundMessage) ([]str
 		h.SetMsgIDList("References", allRefs)
 	}
 
+	h.SetContentType("text/html", map[string]string{"charset": "utf-8"})
+	htmlBody := markdownToHTML(msg.Content)
+
 	var bodyBuf bytes.Buffer
 	w, err := gomail.CreateSingleInlineWriter(&bodyBuf, h)
 	if err != nil {
 		return nil, fmt.Errorf("create mime writer: %w: %w", err, channels.ErrSendFailed)
 	}
-	if _, err := w.Write([]byte(msg.Content)); err != nil {
+	if _, err := w.Write([]byte(htmlBody)); err != nil {
 		return nil, fmt.Errorf("write mime body: %w: %w", err, channels.ErrSendFailed)
 	}
 	if err := w.Close(); err != nil {

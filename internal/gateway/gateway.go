@@ -199,7 +199,7 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 				if !ok {
 					return
 				}
-				_ = externalBus.PublishOutbound(ctx, msg)
+				_ = externalBus.PublishOutbound(ctx, injectDebugIntoHelp(msg))
 			}
 		}
 	}()
@@ -237,6 +237,16 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 
 	logger.Info("Gateway stopped")
 	return nil
+}
+
+// injectDebugIntoHelp appends the /debug entry to outbound help responses.
+// Detection uses the stable marker "/help - Show this help message" that
+// picoclaw's formatHelpMessage always produces for the built-in /help command.
+func injectDebugIntoHelp(msg bus.OutboundMessage) bus.OutboundMessage {
+	if strings.Contains(msg.Content, "/help - Show this help message") {
+		msg.Content += "\n/debug - Toggle debug event forwarding to this chat"
+	}
+	return msg
 }
 
 // handleInbound processes a single inbound message from externalBus.

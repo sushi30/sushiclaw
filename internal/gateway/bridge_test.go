@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -205,5 +206,31 @@ func TestHandleInbound_UnknownCommandBeforeDebug(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for error reply on externalBus")
+	}
+}
+
+// TestInjectDebugIntoHelp_HelpResponse verifies that a /help response gets
+// the /debug line appended.
+func TestInjectDebugIntoHelp_HelpResponse(t *testing.T) {
+	helpContent := "/start - Start the agent\n/help - Show this help message\n/clear - Clear history"
+	msg := bus.OutboundMessage{Channel: "telegram", ChatID: "c1", Content: helpContent}
+	got := injectDebugIntoHelp(msg)
+	if got.Content == helpContent {
+		t.Fatal("expected /debug line to be appended, content unchanged")
+	}
+	const want = "\n/debug - Toggle debug event forwarding to this chat"
+	if !strings.HasSuffix(got.Content, want) {
+		t.Fatalf("expected content to end with %q, got %q", want, got.Content)
+	}
+}
+
+// TestInjectDebugIntoHelp_NonHelpResponse verifies that non-help content is
+// returned unchanged.
+func TestInjectDebugIntoHelp_NonHelpResponse(t *testing.T) {
+	content := "Hello, world!"
+	msg := bus.OutboundMessage{Channel: "telegram", ChatID: "c2", Content: content}
+	got := injectDebugIntoHelp(msg)
+	if got.Content != content {
+		t.Fatalf("expected content unchanged, got %q", got.Content)
 	}
 }

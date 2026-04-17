@@ -64,7 +64,7 @@ func TestDebugManager_FormatEvent(t *testing.T) {
 	}{
 		{
 			name:    "turn_start",
-			evt:     agent.Event{Kind: agent.EventKindTurnStart, Payload: agent.TurnStartPayload{Channel: "tg", ChatID: "c1"}},
+			evt:     agent.Event{Kind: agent.EventKindTurnStart, Payload: agent.TurnStartPayload{UserMessage: "hi"}},
 			wantPfx: "[debug] turn start",
 		},
 		{

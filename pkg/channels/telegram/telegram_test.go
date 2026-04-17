@@ -18,7 +18,6 @@ import (
 
 	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/channels"
-	"github.com/sipeed/picoclaw/pkg/config"
 	"github.com/sipeed/picoclaw/pkg/media"
 )
 
@@ -140,7 +139,6 @@ func newTestChannelWithConstructor(
 		BaseChannel: base,
 		bot:         bot,
 		chatIDs:     make(map[string]int64),
-		config:      config.DefaultConfig(),
 	}
 }
 
@@ -560,12 +558,12 @@ func TestHandleMessage_ForumTopic_SetsMetadata(t *testing.T) {
 	assert.Equal(t, "-1001234567890/42", inbound.ChatID)
 
 	// Peer ID should include thread ID for session key isolation
-	assert.Equal(t, "group", inbound.Peer.Kind)
-	assert.Equal(t, "-1001234567890/42", inbound.Peer.ID)
+	assert.Equal(t, "group", inbound.Context.ChatType)
+	assert.Equal(t, "-1001234567890/42", inbound.Context.ChatID)
 
 	// Parent peer metadata should be set for agent binding
-	assert.Equal(t, "topic", inbound.Metadata["parent_peer_kind"])
-	assert.Equal(t, "42", inbound.Metadata["parent_peer_id"])
+	assert.Equal(t, "topic", inbound.Context.Raw["parent_peer_kind"])
+	assert.Equal(t, "42", inbound.Context.Raw["parent_peer_id"])
 }
 
 func TestHandleMessage_NoForum_NoThreadMetadata(t *testing.T) {
@@ -599,12 +597,12 @@ func TestHandleMessage_NoForum_NoThreadMetadata(t *testing.T) {
 	assert.Equal(t, "-100999", inbound.ChatID)
 
 	// Peer ID should be raw chat ID (no thread suffix)
-	assert.Equal(t, "group", inbound.Peer.Kind)
-	assert.Equal(t, "-100999", inbound.Peer.ID)
+	assert.Equal(t, "group", inbound.Context.ChatType)
+	assert.Equal(t, "-100999", inbound.Context.ChatID)
 
 	// No parent peer metadata
-	assert.Empty(t, inbound.Metadata["parent_peer_kind"])
-	assert.Empty(t, inbound.Metadata["parent_peer_id"])
+	assert.Empty(t, inbound.Context.Raw["parent_peer_kind"])
+	assert.Empty(t, inbound.Context.Raw["parent_peer_id"])
 }
 
 func TestHandleMessage_ReplyThread_NonForum_NoIsolation(t *testing.T) {
@@ -642,12 +640,12 @@ func TestHandleMessage_ReplyThread_NonForum_NoIsolation(t *testing.T) {
 	assert.Equal(t, "-100999", inbound.ChatID)
 
 	// Peer ID should be raw chat ID (shared session for whole group)
-	assert.Equal(t, "group", inbound.Peer.Kind)
-	assert.Equal(t, "-100999", inbound.Peer.ID)
+	assert.Equal(t, "group", inbound.Context.ChatType)
+	assert.Equal(t, "-100999", inbound.Context.ChatID)
 
 	// No parent peer metadata
-	assert.Empty(t, inbound.Metadata["parent_peer_kind"])
-	assert.Empty(t, inbound.Metadata["parent_peer_id"])
+	assert.Empty(t, inbound.Context.Raw["parent_peer_kind"])
+	assert.Empty(t, inbound.Context.Raw["parent_peer_id"])
 }
 
 func assertHandleMessageQuotedUserReply(
@@ -700,7 +698,7 @@ func assertHandleMessageQuotedUserReply(
 
 	inbound, ok := <-messageBus.InboundChan()
 	require.True(t, ok)
-	assert.Equal(t, strconv.Itoa(replyMessageID), inbound.Metadata["reply_to_message_id"])
+	assert.Equal(t, strconv.Itoa(replyMessageID), inbound.Context.Raw["reply_to_message_id"])
 	assert.Equal(t, expectedContent, inbound.Content)
 }
 
@@ -786,7 +784,7 @@ func TestHandleMessage_ReplyToOwnBotMessage_UsesAssistantRole(t *testing.T) {
 
 	inbound, ok := <-messageBus.InboundChan()
 	require.True(t, ok)
-	assert.Equal(t, "101", inbound.Metadata["reply_to_message_id"])
+	assert.Equal(t, "101", inbound.Context.Raw["reply_to_message_id"])
 	assert.Equal(
 		t,
 		"[quoted assistant message from afjcjsbx_picoclaw_bot]: Fatto! Ho creato il file notizie_2026_03_28.md\n\nti ricordi questo file?",

@@ -198,8 +198,8 @@ func TestEmailInboundPipeline(t *testing.T) {
 		if !strings.Contains(msg.Content, "Hello integration test") {
 			t.Errorf("content = %q, want to contain %q", msg.Content, "Hello integration test")
 		}
-		if msg.Metadata == nil || msg.Metadata["reply_to_message_id"] != "integration-test@test.com" {
-			t.Errorf("metadata[reply_to_message_id] = %q, want %q", msg.Metadata["reply_to_message_id"], "integration-test@test.com")
+		if msg.Context.Raw == nil || msg.Context.Raw["reply_to_message_id"] != "integration-test@test.com" {
+			t.Errorf("metadata[reply_to_message_id] = %q, want %q", msg.Context.Raw["reply_to_message_id"], "integration-test@test.com")
 		}
 	case <-ctx.Done():
 		t.Fatal("timeout: no inbound message received — IMAP poll did not deliver the message to the bus")
@@ -317,8 +317,8 @@ func TestEmailReplyThreading(t *testing.T) {
 		if msg.MessageID != originalMsgID {
 			t.Errorf("inbound MessageID = %q, want %q", msg.MessageID, originalMsgID)
 		}
-		if msg.Metadata == nil || msg.Metadata["reply_to_message_id"] != originalMsgID {
-			t.Errorf("inbound metadata[reply_to_message_id] = %q, want %q", msg.Metadata["reply_to_message_id"], originalMsgID)
+		if msg.Context.Raw == nil || msg.Context.Raw["reply_to_message_id"] != originalMsgID {
+			t.Errorf("inbound metadata[reply_to_message_id] = %q, want %q", msg.Context.Raw["reply_to_message_id"], originalMsgID)
 		}
 	case <-ctx.Done():
 		t.Fatal("timeout: no inbound message — IMAP poll did not deliver the message")
@@ -405,8 +405,8 @@ func TestEmailNewEmail_ThreadReply(t *testing.T) {
 	// Wait for inbound message.
 	select {
 	case msg := <-msgBus.InboundChan():
-		if msg.Metadata == nil || msg.Metadata["reply_to_message_id"] != msgID {
-			t.Errorf("inbound metadata[reply_to_message_id] = %q, want %q", msg.Metadata["reply_to_message_id"], msgID)
+		if msg.Context.Raw == nil || msg.Context.Raw["reply_to_message_id"] != msgID {
+			t.Errorf("inbound metadata[reply_to_message_id] = %q, want %q", msg.Context.Raw["reply_to_message_id"], msgID)
 		}
 	case <-ctx.Done():
 		t.Fatal("timeout: no inbound message")
@@ -493,8 +493,8 @@ func TestEmailReplyChain_ThreadContinuation(t *testing.T) {
 	// Wait for the original inbound message.
 	select {
 	case msg := <-msgBus.InboundChan():
-		if msg.Metadata["reply_to_message_id"] != originalMsgID {
-			t.Errorf("inbound metadata[reply_to_message_id] = %q, want %q", msg.Metadata["reply_to_message_id"], originalMsgID)
+		if msg.Context.Raw["reply_to_message_id"] != originalMsgID {
+			t.Errorf("inbound metadata[reply_to_message_id] = %q, want %q", msg.Context.Raw["reply_to_message_id"], originalMsgID)
 		}
 	case <-ctx.Done():
 		t.Fatal("timeout: no inbound message")
@@ -546,8 +546,8 @@ func TestEmailReplyChain_ThreadContinuation(t *testing.T) {
 	// is simply the message's own ID — the agent can follow the chain from there.
 	select {
 	case msg := <-msgBus.InboundChan():
-		if msg.Metadata["reply_to_message_id"] != "human-reply-789@test.com" {
-			t.Errorf("human reply metadata[reply_to_message_id] = %q, want %q", msg.Metadata["reply_to_message_id"], "human-reply-789@test.com")
+		if msg.Context.Raw["reply_to_message_id"] != "human-reply-789@test.com" {
+			t.Errorf("human reply metadata[reply_to_message_id] = %q, want %q", msg.Context.Raw["reply_to_message_id"], "human-reply-789@test.com")
 		}
 	case <-ctx.Done():
 		t.Fatal("timeout: no inbound message from human reply")
@@ -585,9 +585,9 @@ func TestEmailNewEmail_FreshThread(t *testing.T) {
 
 	select {
 	case msg := <-msgBus.InboundChan():
-		if msg.Metadata["reply_to_message_id"] != "fresh-111@example.com" {
+		if msg.Context.Raw["reply_to_message_id"] != "fresh-111@example.com" {
 			t.Errorf("fresh email metadata[reply_to_message_id] = %q, want %q",
-				msg.Metadata["reply_to_message_id"], "fresh-111@example.com")
+				msg.Context.Raw["reply_to_message_id"], "fresh-111@example.com")
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timeout: no inbound message from fresh email")

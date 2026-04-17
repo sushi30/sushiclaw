@@ -438,10 +438,17 @@ func (c *EmailChannel) processEmail(ctx context.Context, envelope *imap.Envelope
 		DisplayName: displayName(envelope),
 	}
 
-	c.HandleMessage(ctx,
-		bus.Peer{Kind: "direct", ID: fromAddr},
-		envelope.MessageID, fromAddr, fromAddr, plainText,
-		nil, metadata,
+	c.HandleMessageWithContext(ctx,
+		fromAddr,
+		plainText,
+		nil,
+		bus.InboundContext{
+			ChatType:  "direct",
+			ChatID:    fromAddr,
+			SenderID:  fromAddr,
+			MessageID: envelope.MessageID,
+			Raw:       metadata,
+		},
 		sender,
 	)
 

@@ -7,7 +7,8 @@ import (
 )
 
 func init() {
-	channels.RegisterFactory("telegram", func(cfg *config.Config, b *bus.MessageBus) (channels.Channel, error) {
-		return NewTelegramChannel(cfg, b)
-	})
+	channels.RegisterSafeFactory(config.ChannelTelegram,
+		func(bc *config.Channel, tgCfg *config.TelegramSettings, b *bus.MessageBus) (channels.Channel, error) {
+			return NewTelegramChannel(bc, tgCfg, b)
+		})
 }

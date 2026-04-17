@@ -91,7 +91,7 @@ func (d *DebugManager) formatEvent(evt agent.Event) string {
 		if !ok {
 			break
 		}
-		return fmt.Sprintf("[debug] turn start: channel=%s chat=%s", p.Channel, p.ChatID)
+		return fmt.Sprintf("[debug] turn start: msg=%s media=%d", p.UserMessage, p.MediaCount)
 
 	case agent.EventKindTurnEnd:
 		p, ok := evt.Payload.(agent.TurnEndPayload)

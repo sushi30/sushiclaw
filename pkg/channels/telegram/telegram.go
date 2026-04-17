@@ -47,7 +47,8 @@ type TelegramChannel struct {
 	*channels.BaseChannel
 	bot     *telego.Bot
 	bh      *th.BotHandler
-	config  *config.Config
+	bc      *config.Channel
+	tgCfg   *config.TelegramSettings
 	chatIDs map[string]int64
 	ctx     context.Context
 	cancel  context.CancelFunc
@@ -56,9 +57,8 @@ type TelegramChannel struct {
 	commandRegCancel context.CancelFunc
 }
 
-func NewTelegramChannel(cfg *config.Config, bus *bus.MessageBus) (*TelegramChannel, error) {
+func NewTelegramChannel(bc *config.Channel, telegramCfg *config.TelegramSettings, bus *bus.MessageBus) (*TelegramChannel, error) {
 	var opts []telego.BotOption
-	telegramCfg := cfg.Channels.Telegram
 
 	if telegramCfg.Proxy != "" {
 		proxyURL, parseErr := url.Parse(telegramCfg.Proxy)
@@ -90,19 +90,20 @@ func NewTelegramChannel(cfg *config.Config, bus *bus.MessageBus) (*TelegramChann
 	}
 
 	base := channels.NewBaseChannel(
-		"telegram",
+		bc.Name(),
 		telegramCfg,
 		bus,
-		telegramCfg.AllowFrom,
+		bc.AllowFrom,
 		channels.WithMaxMessageLength(4000),
-		channels.WithGroupTrigger(telegramCfg.GroupTrigger),
-		channels.WithReasoningChannelID(telegramCfg.ReasoningChannelID),
+		channels.WithGroupTrigger(bc.GroupTrigger),
+		channels.WithReasoningChannelID(bc.ReasoningChannelID),
 	)
 
 	return &TelegramChannel{
 		BaseChannel: base,
 		bot:         bot,
-		config:      cfg,
+		bc:          bc,
+		tgCfg:       telegramCfg,
 		chatIDs:     make(map[string]int64),
 	}, nil
 }
@@ -174,7 +175,10 @@ func (c *TelegramChannel) Send(ctx context.Context, msg bus.OutboundMessage) ([]
 		return nil, channels.ErrNotRunning
 	}
 
-	useMarkdownV2 := c.config.Channels.Telegram.UseMarkdownV2
+	var useMarkdownV2 bool
+	if c.tgCfg != nil {
+		useMarkdownV2 = c.tgCfg.UseMarkdownV2
+	}
 
 	chatID, threadID, err := parseTelegramChatID(msg.ChatID)
 	if err != nil {
@@ -360,7 +364,10 @@ func (c *TelegramChannel) StartTyping(ctx context.Context, chatID string) (func(
 
 // EditMessage implements channels.MessageEditor.
 func (c *TelegramChannel) EditMessage(ctx context.Context, chatID string, messageID string, content string) error {
-	useMarkdownV2 := c.config.Channels.Telegram.UseMarkdownV2
+	var useMarkdownV2 bool
+	if c.tgCfg != nil {
+		useMarkdownV2 = c.tgCfg.UseMarkdownV2
+	}
 	cid, _, err := parseTelegramChatID(chatID)
 	if err != nil {
 		return err
@@ -435,7 +442,10 @@ func (c *TelegramChannel) DeleteMessage(ctx context.Context, chatID string, mess
 // It sends a placeholder message (e.g. "Thinking... 💭") that will later be
 // edited to the actual response via EditMessage (channels.MessageEditor).
 func (c *TelegramChannel) SendPlaceholder(ctx context.Context, chatID string) (string, error) {
-	phCfg := c.config.Channels.Telegram.Placeholder
+	if c.bc == nil {
+		return "", nil
+	}
+	phCfg := c.bc.Placeholder
 	if !phCfg.Enabled {
 		return "", nil
 	}
@@ -747,7 +757,6 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 		peerID = compositeChatID
 	}
 
-	peer := bus.Peer{Kind: peerKind, ID: peerID}
 	messageID := fmt.Sprintf("%d", message.MessageID)
 
 	metadata := map[string]string{
@@ -766,14 +775,18 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 		metadata["parent_peer_id"] = fmt.Sprintf("%d", threadID)
 	}
 
-	c.HandleMessage(c.ctx,
-		peer,
-		messageID,
-		platformID,
+	inboundCtx := bus.InboundContext{
+		ChatType:  peerKind,
+		ChatID:    peerID,
+		SenderID:  platformID,
+		MessageID: messageID,
+		Raw:       metadata,
+	}
+	c.HandleMessageWithContext(c.ctx,
 		compositeChatID,
 		content,
 		mediaPaths,
-		metadata,
+		inboundCtx,
 		sender,
 	)
 	return nil
@@ -1066,7 +1079,7 @@ func (c *TelegramChannel) stripBotMention(content string) string {
 
 // BeginStream implements channels.StreamingCapable.
 func (c *TelegramChannel) BeginStream(ctx context.Context, chatID string) (channels.Streamer, error) {
-	if !c.config.Channels.Telegram.Streaming.Enabled {
+	if c.tgCfg == nil || !c.tgCfg.Streaming.Enabled {
 		return nil, fmt.Errorf("streaming disabled in config")
 	}
 
@@ -1075,7 +1088,7 @@ func (c *TelegramChannel) BeginStream(ctx context.Context, chatID string) (chann
 		return nil, err
 	}
 
-	streamCfg := c.config.Channels.Telegram.Streaming
+	streamCfg := c.tgCfg.Streaming
 	return &telegramStreamer{
 		bot:              c.bot,
 		chatID:           cid,

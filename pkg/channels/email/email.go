@@ -404,7 +404,17 @@ func (c *EmailChannel) processEmail(ctx context.Context, envelope *imap.Envelope
 		return false, ""
 	}
 
-	plainText, references := extractBodyParts(bodyLiteral)
+	raw, err := io.ReadAll(bodyLiteral)
+	if err != nil {
+		return false, ""
+	}
+
+	if isCalendarRSVP(envelope, raw) {
+		logger.InfoCF("email", "Skipping calendar RSVP", map[string]any{"subject": envelope.Subject})
+		return true, ""
+	}
+
+	plainText, references := extractBodyParts(bytes.NewReader(raw))
 	if strings.TrimSpace(plainText) == "" {
 		return false, ""
 	}
@@ -535,6 +545,35 @@ func extractBodyParts(r io.Reader) (text, references string) {
 	}
 
 	return "", references
+}
+
+func isCalendarRSVP(envelope *imap.Envelope, raw []byte) bool {
+	rsvpPrefixes := []string{"Accepted: ", "Declined: ", "Tentative: ", "Invitation: "}
+	for _, prefix := range rsvpPrefixes {
+		if strings.HasPrefix(envelope.Subject, prefix) {
+			return true
+		}
+	}
+	mr, err := gomail.CreateReader(bytes.NewReader(raw))
+	if err != nil {
+		return false
+	}
+	for {
+		p, err := mr.NextPart()
+		if err != nil {
+			break
+		}
+		var ct string
+		if h, ok := p.Header.(*gomail.InlineHeader); ok {
+			ct, _, _ = h.ContentType()
+		} else if h, ok := p.Header.(*gomail.AttachmentHeader); ok {
+			ct, _, _ = h.ContentType()
+		}
+		if ct == "text/calendar" || ct == "application/ics" {
+			return true
+		}
+	}
+	return false
 }
 
 func stripHTMLText(src string) string {

@@ -443,7 +443,7 @@ func TestSend_ReplyThreadingHeaders(t *testing.T) {
 			t.Fatal(err)
 		}
 		body := <-received
-		for _, want := range []string{"Subject: Re: Hello Agent", "In-Reply-To: <orig@test.com>", "References: <orig@test.com>"} {
+		for _, want := range []string{"Subject: Re: Hello Agent", "In-Reply-To: <orig@test.com>", "References: <orig@test.com>", "Content-Type: text/html"} {
 			if !strings.Contains(body, want) {
 				t.Errorf("missing %q in:\n%s", want, body)
 			}

@@ -7,6 +7,7 @@ import (
 	"github.com/sipeed/picoclaw/pkg/agent"
 	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/config"
+	"github.com/sushi30/sushiclaw/internal/commandfilter"
 )
 
 func newBridgeTestLoop() *agent.AgentLoop {
@@ -18,6 +19,7 @@ func newBridgeTestLoop() *agent.AgentLoop {
 func TestHandleInbound_DebugCommand(t *testing.T) {
 	agentBus := bus.NewMessageBus()
 	extBus := bus.NewMessageBus()
+	cmdFilter := commandfilter.NewCommandFilter()
 	mgr := &DebugManager{agentLoop: newBridgeTestLoop(), externalBus: extBus}
 
 	ctx := t.Context()
@@ -26,7 +28,7 @@ func TestHandleInbound_DebugCommand(t *testing.T) {
 		Channel: "telegram",
 		ChatID:  "chat99",
 		Content: "/debug",
-	}, mgr, agentBus, extBus)
+	}, cmdFilter, mgr, agentBus, extBus)
 
 	// externalBus should have the toggle reply.
 	select {
@@ -53,11 +55,12 @@ func TestHandleInbound_DebugCommand(t *testing.T) {
 	}
 }
 
-// TestHandleInbound_NormalMessage verifies that a non-debug message is
+// TestHandleInbound_NormalMessage verifies that a non-debug, non-command message is
 // forwarded to agentBus and no reply appears on externalBus.
 func TestHandleInbound_NormalMessage(t *testing.T) {
 	agentBus := bus.NewMessageBus()
 	extBus := bus.NewMessageBus()
+	cmdFilter := commandfilter.NewCommandFilter()
 	mgr := &DebugManager{agentLoop: newBridgeTestLoop(), externalBus: extBus}
 
 	ctx := t.Context()
@@ -66,7 +69,7 @@ func TestHandleInbound_NormalMessage(t *testing.T) {
 		Channel: "telegram",
 		ChatID:  "chat88",
 		Content: "hello world",
-	}, mgr, agentBus, extBus)
+	}, cmdFilter, mgr, agentBus, extBus)
 
 	// agentBus should receive the forwarded message.
 	select {
@@ -84,5 +87,123 @@ func TestHandleInbound_NormalMessage(t *testing.T) {
 		t.Fatalf("unexpected reply on externalBus: %+v", out)
 	default:
 		// Nothing there — correct.
+	}
+}
+
+// TestHandleInbound_KnownCommand verifies that a known slash command like /help
+// is forwarded to agentBus (not blocked).
+func TestHandleInbound_KnownCommand(t *testing.T) {
+	agentBus := bus.NewMessageBus()
+	extBus := bus.NewMessageBus()
+	cmdFilter := commandfilter.NewCommandFilter()
+	mgr := &DebugManager{agentLoop: newBridgeTestLoop(), externalBus: extBus}
+
+	ctx := t.Context()
+
+	handleInbound(ctx, bus.InboundMessage{
+		Channel: "telegram",
+		ChatID:  "chat77",
+		Content: "/help",
+	}, cmdFilter, mgr, agentBus, extBus)
+
+	select {
+	case fwd := <-agentBus.InboundChan():
+		if fwd.Content != "/help" {
+			t.Fatalf("forwarded Content = %q, want /help", fwd.Content)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for /help on agentBus")
+	}
+}
+
+// TestHandleInbound_UnknownCommandBlocked verifies that an unrecognized slash
+// command is blocked: an error reply appears on externalBus and nothing is
+// forwarded to agentBus.
+func TestHandleInbound_UnknownCommandBlocked(t *testing.T) {
+	agentBus := bus.NewMessageBus()
+	extBus := bus.NewMessageBus()
+	cmdFilter := commandfilter.NewCommandFilter()
+	mgr := &DebugManager{agentLoop: newBridgeTestLoop(), externalBus: extBus}
+
+	ctx := t.Context()
+
+	handleInbound(ctx, bus.InboundMessage{
+		Channel: "telegram",
+		ChatID:  "chat55",
+		Content: "/nonexistent",
+	}, cmdFilter, mgr, agentBus, extBus)
+
+	select {
+	case out := <-extBus.OutboundChan():
+		if out.Content != "Unknown command: /nonexistent" {
+			t.Fatalf("expected 'Unknown command: /nonexistent', got %q", out.Content)
+		}
+		if out.Channel != "telegram" || out.ChatID != "chat55" {
+			t.Errorf("expected telegram/chat55, got %s/%s", out.Channel, out.ChatID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for error reply on externalBus")
+	}
+
+	// agentBus must NOT have received the blocked command.
+	select {
+	case fwd := <-agentBus.InboundChan():
+		t.Fatalf("unexpected message forwarded to agentBus: %+v", fwd)
+	default:
+		// Nothing there — correct.
+	}
+}
+
+// TestHandleInbound_SystemMessagePassesThrough verifies that system channel
+// messages bypass command filtering.
+func TestHandleInbound_SystemMessagePassesThrough(t *testing.T) {
+	agentBus := bus.NewMessageBus()
+	extBus := bus.NewMessageBus()
+	cmdFilter := commandfilter.NewCommandFilter()
+	mgr := &DebugManager{agentLoop: newBridgeTestLoop(), externalBus: extBus}
+
+	ctx := t.Context()
+
+	handleInbound(ctx, bus.InboundMessage{
+		Channel: "system",
+		ChatID:  "sys:123",
+		Content: "/nonexistent",
+	}, cmdFilter, mgr, agentBus, extBus)
+
+	select {
+	case fwd := <-agentBus.InboundChan():
+		if fwd.Channel != "system" {
+			t.Errorf("expected system, got %s", fwd.Channel)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for system message on agentBus")
+	}
+}
+
+// TestHandleInbound_UnknownCommandBeforeDebug verifies that /debug is NOT
+// reachable via an unrecognized command name — i.e., /debuq should be blocked,
+// not treated as /debug.
+func TestHandleInbound_UnknownCommandBeforeDebug(t *testing.T) {
+	agentBus := bus.NewMessageBus()
+	extBus := bus.NewMessageBus()
+	cmdFilter := commandfilter.NewCommandFilter()
+	mgr := &DebugManager{agentLoop: newBridgeTestLoop(), externalBus: extBus}
+
+	ctx := t.Context()
+
+	handleInbound(ctx, bus.InboundMessage{
+		Channel: "telegram",
+		ChatID:  "chat44",
+		Content: "/debuq",
+	}, cmdFilter, mgr, agentBus, extBus)
+
+	// Should get the "Unknown command" error, not a debug toggle reply.
+	select {
+	case out := <-extBus.OutboundChan():
+		if out.Content != "Unknown command: /debuq" {
+			t.Fatalf("expected 'Unknown command: /debuq', got %q", out.Content)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for error reply on externalBus")
 	}
 }

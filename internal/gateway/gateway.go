@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/sushi30/sushiclaw/internal/commandfilter"
 	"github.com/sushi30/sushiclaw/internal/envresolve"
 	"github.com/sushi30/sushiclaw/pkg/channels/email"
 	sushitools "github.com/sushi30/sushiclaw/pkg/tools"
@@ -83,10 +84,13 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 
 	// externalBus: channels publish inbound here; channel manager reads outbound from here.
 	// agentBus: agent loop reads inbound from here; publishes outbound here.
-	// A bridge goroutine intercepts /debug on the inbound path and forwards everything
-	// else to agentBus. A second bridge forwards agent responses back to externalBus.
+	// Bridge goroutines intercept inbound messages (blocking unrecognized slash
+	// commands and handling /debug) before forwarding to agentBus, and proxy
+	// outbound responses back to externalBus.
 	externalBus := bus.NewMessageBus()
 	agentBus := bus.NewMessageBus()
+	cmdFilter := commandfilter.NewCommandFilter()
+
 	agentLoop := agent.NewAgentLoop(cfg, agentBus, provider)
 
 	if allowedSenders := sushitools.ParseAllowedSenders(); len(allowedSenders) > 0 {
@@ -169,7 +173,8 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 
 	debugMgr := &DebugManager{agentLoop: agentLoop, externalBus: externalBus}
 
-	// Inbound bridge: intercept /debug before forwarding to agent loop.
+	// Inbound bridge: intercept /debug and block unrecognized slash commands
+	// before forwarding valid messages to agentBus for normal agent-loop processing.
 	go func() {
 		for {
 			select {
@@ -179,7 +184,7 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 				if !ok {
 					return
 				}
-				handleInbound(ctx, msg, debugMgr, agentBus, externalBus)
+				handleInbound(ctx, msg, cmdFilter, debugMgr, agentBus, externalBus)
 			}
 		}
 	}()
@@ -235,9 +240,28 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 }
 
 // handleInbound processes a single inbound message from externalBus.
-// /debug is intercepted and handled by debugMgr; all other messages are
-// forwarded to agentBus for normal agent-loop processing.
-func handleInbound(ctx context.Context, msg bus.InboundMessage, debugMgr *DebugManager, agentBus, externalBus *bus.MessageBus) {
+// Unrecognized slash commands are blocked with an error reply.
+// /debug is intercepted and handled by debugMgr.
+// All other messages are forwarded to agentBus for normal agent-loop processing.
+func handleInbound(ctx context.Context, msg bus.InboundMessage, cmdFilter *commandfilter.CommandFilter, debugMgr *DebugManager, agentBus, externalBus *bus.MessageBus) {
+	// Block unrecognized slash commands before they reach the agent loop.
+	dec := cmdFilter.Filter(msg)
+	if dec.Result == commandfilter.Block {
+		logger.InfoCF("commandfilter", "Blocked unrecognized slash command",
+			map[string]any{
+				"channel": msg.Channel,
+				"chat_id": msg.ChatID,
+				"command": dec.Command,
+			})
+		_ = externalBus.PublishOutbound(ctx, bus.OutboundMessage{
+			Channel: msg.Channel,
+			ChatID:  msg.ChatID,
+			Content: dec.ErrMsg,
+		})
+		return
+	}
+
+	// Handle /debug toggle.
 	if strings.TrimSpace(msg.Content) == "/debug" {
 		reply := debugMgr.Toggle(ctx, msg.Channel, msg.ChatID)
 		_ = externalBus.PublishOutbound(ctx, bus.OutboundMessage{
@@ -247,6 +271,7 @@ func handleInbound(ctx context.Context, msg bus.InboundMessage, debugMgr *DebugM
 		})
 		return
 	}
+
 	_ = agentBus.PublishInbound(ctx, msg)
 }
 

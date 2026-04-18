@@ -88,4 +88,3 @@ func configFilePath() string {
 	}
 	return filepath.Join(home, "config.json")
 }
-

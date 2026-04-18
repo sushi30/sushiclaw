@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/sipeed/picoclaw/pkg/config"
+
+	"github.com/sushi30/sushiclaw/pkg/channels/email"
 )
 
 func TestExampleConfigLoadsAsV2(t *testing.T) {
@@ -65,17 +67,15 @@ func TestExampleConfigLoadsAsV2(t *testing.T) {
 		t.Error("telegram streaming.enabled should be true in example config")
 	}
 
-	// Email channel is owned by sushiclaw and not part of picoclaw's ChannelsConfig.
-	// Verify the section is present and parseable via raw JSON.
-	var raw struct {
-		EmailChannel struct {
-			SMTPHost string `json:"smtp_host"`
-		} `json:"email_channel"`
+	// Email is wired separately via email.InitChannel (not through picoclaw's ChannelsConfig).
+	// Decode email_channel directly into email.EmailConfig so json tag renames break this test.
+	var rawTop struct {
+		EmailChannel email.EmailConfig `json:"email_channel"`
 	}
-	if err := json.Unmarshal(data, &raw); err != nil {
-		t.Fatalf("parse email section: %v", err)
+	if err := json.Unmarshal(data, &rawTop); err != nil {
+		t.Fatalf("parse email_channel section: %v", err)
 	}
-	if raw.EmailChannel.SMTPHost == "" {
-		t.Error("email smtp_host missing from example config")
+	if rawTop.EmailChannel.SMTPHost == "" {
+		t.Error("email_channel.smtp_host missing from example config")
 	}
 }

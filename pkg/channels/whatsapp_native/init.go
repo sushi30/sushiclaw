@@ -9,7 +9,7 @@ import (
 )
 
 func init() {
-	channels.RegisterFactory("whatsapp", func(channelName, _ string, cfg *config.Config, b *bus.MessageBus) (channels.Channel, error) {
+	channels.RegisterFactory("whatsapp_native", func(channelName, _ string, cfg *config.Config, b *bus.MessageBus) (channels.Channel, error) {
 		bc := cfg.Channels[channelName]
 		decoded, err := bc.GetDecoded()
 		if err != nil {

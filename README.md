@@ -65,26 +65,25 @@ When a message arrives from a sender not listed in `allow_from`, sushiclaw repli
 
 SMTP (outbound) + IMAP polling (inbound) channel. The agent can receive and reply to emails.
 
-Config block (`channels.email` in `config.json`):
+Email is wired as a sidecar outside picoclaw's channel registry. Its config lives under a
+top-level `email_channel` key — **not** inside `channels`:
 
 ```json
 {
-  "channels": {
-    "email": {
-      "enabled": true,
-      "smtp_host": "smtp.example.com",
-      "smtp_port": 587,
-      "smtp_from": "bot@example.com",
-      "smtp_user": "bot@example.com",
-      "smtp_password": "env://SMTP_PASSWORD",
-      "imap_host": "imap.example.com",
-      "imap_port": 993,
-      "imap_user": "bot@example.com",
-      "imap_password": "env://IMAP_PASSWORD",
-      "poll_interval_secs": 30,
-      "allow_from": ["trusted@example.com"],
-      "default_subject": "Re: your message"
-    }
+  "email_channel": {
+    "enabled": true,
+    "smtp_host": "smtp.example.com",
+    "smtp_port": 587,
+    "smtp_from": "bot@example.com",
+    "smtp_user": "bot@example.com",
+    "smtp_password": "env://SMTP_PASSWORD",
+    "imap_host": "imap.example.com",
+    "imap_port": 993,
+    "imap_user": "bot@example.com",
+    "imap_password": "env://IMAP_PASSWORD",
+    "poll_interval_secs": 30,
+    "allow_from": ["trusted@example.com"],
+    "default_subject": "Re: your message"
   }
 }
 ```
@@ -93,3 +92,6 @@ Config block (`channels.email` in `config.json`):
 - Port 993 (default) → implicit TLS for IMAP.
 - Polled messages are marked `\Seen` after processing.
 - `allow_from` restricts which sender addresses the agent will respond to.
+
+> **Migrating from an older config?** See [RELEASE_NOTES.md](RELEASE_NOTES.md) for
+> step-by-step instructions if your config uses the old `channels.email` format.

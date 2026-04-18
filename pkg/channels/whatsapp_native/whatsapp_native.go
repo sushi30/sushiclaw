@@ -705,24 +705,24 @@ func (c *WhatsAppNativeChannel) Send(ctx context.Context, msg bus.OutboundMessag
 // and injects WhatsApp widget metadata (Content-Type, X-WA-Body, X-WA-Option-N).
 // It is a no-op when Content-Type is already set or no option pattern is found.
 func injectWidgetMetadata(msg bus.OutboundMessage) bus.OutboundMessage {
-	if msg.Metadata["Content-Type"] != "" {
+	if msg.Context.Raw["Content-Type"] != "" {
 		return msg
 	}
 	body, opts := detectOptions(msg.Content)
 	if len(opts) == 0 {
 		return msg
 	}
-	if msg.Metadata == nil {
-		msg.Metadata = make(map[string]string)
+	if msg.Context.Raw == nil {
+		msg.Context.Raw = make(map[string]string)
 	}
 	if len(opts) <= waMaxButtonOptions {
-		msg.Metadata["Content-Type"] = "application/x-wa-buttons"
+		msg.Context.Raw["Content-Type"] = "application/x-wa-buttons"
 	} else {
-		msg.Metadata["Content-Type"] = "application/x-wa-list"
+		msg.Context.Raw["Content-Type"] = "application/x-wa-list"
 	}
-	msg.Metadata["X-WA-Body"] = stripMarkdown(body)
+	msg.Context.Raw["X-WA-Body"] = stripMarkdown(body)
 	for i, opt := range opts {
-		msg.Metadata[fmt.Sprintf("X-WA-Option-%d", i)] = opt
+		msg.Context.Raw[fmt.Sprintf("X-WA-Option-%d", i)] = opt
 	}
 	return msg
 }

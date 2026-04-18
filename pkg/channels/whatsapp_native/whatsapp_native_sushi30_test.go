@@ -594,16 +594,16 @@ func TestSend_OptionsAutoDetect_ListWidget(t *testing.T) {
 func TestSend_ExistingContentType_NotOverridden(t *testing.T) {
 	msg := bus.OutboundMessage{
 		Content: "Which list?\n1. Backlog\n2. In Progress",
-		Metadata: map[string]string{
-			"Content-Type": "application/x-wa-list",
-			"X-WA-Body":    "manual body",
+		Context: bus.InboundContext{Raw: map[string]string{
+			"Content-Type":  "application/x-wa-list",
+			"X-WA-Body":     "manual body",
 			"X-WA-Option-0": "Custom A",
 			"X-WA-Option-1": "Custom B",
-		},
+		}},
 	}
 	result := injectWidgetMetadata(msg)
-	if result.Metadata["X-WA-Body"] != "manual body" {
-		t.Errorf("existing Content-Type should not be overridden; X-WA-Body: got %q", result.Metadata["X-WA-Body"])
+	if result.Context.Raw["X-WA-Body"] != "manual body" {
+		t.Errorf("existing Content-Type should not be overridden; X-WA-Body: got %q", result.Context.Raw["X-WA-Body"])
 	}
 }
 
@@ -612,8 +612,8 @@ func TestSend_NoBodySuffix_NotDetected(t *testing.T) {
 		Content: "Here are some items\n1. Alpha\n2. Beta",
 	}
 	result := injectWidgetMetadata(msg)
-	if result.Metadata["Content-Type"] != "" {
-		t.Errorf("expected no Content-Type for body without ?/: suffix, got %q", result.Metadata["Content-Type"])
+	if result.Context.Raw["Content-Type"] != "" {
+		t.Errorf("expected no Content-Type for body without ?/: suffix, got %q", result.Context.Raw["Content-Type"])
 	}
 	waMsg := buildOutboundProtoMessage(result)
 	if waMsg.GetConversation() == "" {

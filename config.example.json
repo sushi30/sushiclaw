@@ -22,9 +22,8 @@
     }
   ],
   "channels": {
-    "whatsapp": {
+    "whatsapp_native": {
       "enabled": false,
-      "bridge_url": "ws://localhost:3001",
       "use_native": true,
       "session_store_path": "",
       "allow_from": [],

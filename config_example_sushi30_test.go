@@ -41,10 +41,10 @@ func TestExampleConfigLoadsAsV2(t *testing.T) {
 		t.Error("model_list is empty")
 	}
 
-	// WhatsApp: use_native should be set
-	waDecoded, err := cfg.Channels["whatsapp"].GetDecoded()
+	// WhatsApp: use_native should be set (channel registered under "whatsapp_native" key)
+	waDecoded, err := cfg.Channels["whatsapp_native"].GetDecoded()
 	if err != nil {
-		t.Fatalf("decode whatsapp settings: %v", err)
+		t.Fatalf("decode whatsapp_native settings: %v", err)
 	}
 	waCfg, ok := waDecoded.(*config.WhatsAppSettings)
 	if !ok {

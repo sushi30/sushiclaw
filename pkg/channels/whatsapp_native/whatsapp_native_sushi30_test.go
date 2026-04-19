@@ -2,6 +2,7 @@ package whatsapp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -618,6 +619,66 @@ func TestSend_NoBodySuffix_NotDetected(t *testing.T) {
 	waMsg := buildOutboundProtoMessage(result)
 	if waMsg.GetConversation() == "" {
 		t.Error("expected plain Conversation fallback")
+	}
+}
+
+func TestRetrySend_SucceedsOnFirstTry(t *testing.T) {
+	calls := 0
+	err := retrySend(context.Background(), 3, time.Microsecond, time.Microsecond, func() error {
+		calls++
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("expected nil, got %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("expected 1 call, got %d", calls)
+	}
+}
+
+func TestRetrySend_SucceedsOnNthAttempt(t *testing.T) {
+	calls := 0
+	err := retrySend(context.Background(), 5, time.Microsecond, time.Microsecond, func() error {
+		calls++
+		if calls < 4 {
+			return fmt.Errorf("transient")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("expected nil, got %v", err)
+	}
+	if calls != 4 {
+		t.Fatalf("expected 4 calls, got %d", calls)
+	}
+}
+
+func TestRetrySend_ExhaustsRetries(t *testing.T) {
+	calls := 0
+	err := retrySend(context.Background(), 3, time.Microsecond, time.Microsecond, func() error {
+		calls++
+		return fmt.Errorf("always fails")
+	})
+	if !errors.Is(err, channels.ErrSendFailed) {
+		t.Fatalf("expected ErrSendFailed, got %v", err)
+	}
+	if calls != 4 { // 0..maxRetries inclusive
+		t.Fatalf("expected 4 calls, got %d", calls)
+	}
+}
+
+func TestRetrySend_ContextCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	calls := 0
+	err := retrySend(ctx, 10, time.Millisecond*50, time.Millisecond*50, func() error {
+		calls++
+		if calls == 1 {
+			cancel()
+		}
+		return fmt.Errorf("fail")
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
 	}
 }
 

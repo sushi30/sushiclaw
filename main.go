@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/sushi30/sushiclaw/internal/gateway"
+	"github.com/sushi30/sushiclaw/internal/version"
 
 	// Register owned channel implementations.
 	_ "github.com/sushi30/sushiclaw/pkg/channels/telegram"
@@ -29,7 +30,20 @@ func newRootCommand() *cobra.Command {
 		Short: "Sushiclaw personal AI agent",
 	}
 	cmd.AddCommand(newGatewayCommand())
+	cmd.AddCommand(newVersionCommand())
 	return cmd
+}
+
+func newVersionCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:     "version",
+		Aliases: []string{"v"},
+		Short:   "Print build commit hash",
+		Args:    cobra.NoArgs,
+		Run: func(_ *cobra.Command, _ []string) {
+			fmt.Println(version.GitCommit)
+		},
+	}
 }
 
 func newGatewayCommand() *cobra.Command {

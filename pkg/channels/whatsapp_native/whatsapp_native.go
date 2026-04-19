@@ -10,6 +10,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,6 +46,10 @@ const (
 	reconnectInitial    = 5 * time.Second
 	reconnectMax        = 5 * time.Minute
 	reconnectMultiplier = 2.0
+
+	waSendMaxRetries  = 10
+	waSendBaseBackoff = 500 * time.Millisecond
+	waSendMaxBackoff  = 60 * time.Second
 )
 
 // WhatsAppNativeChannel implements the WhatsApp channel using whatsmeow (in-process, no external bridge).
@@ -688,17 +694,46 @@ func (c *WhatsAppNativeChannel) Send(ctx context.Context, msg bus.OutboundMessag
 
 	to, err := parseJID(msg.ChatID)
 	if err != nil {
-		return nil, fmt.Errorf("invalid chat id %q: %w", msg.ChatID, err)
+		return nil, fmt.Errorf("invalid chat id %q: %w", msg.ChatID, channels.ErrSendFailed)
 	}
 
 	msg = injectWidgetMetadata(msg)
 	msg.Content = stripMarkdown(msg.Content)
 	waMsg := buildOutboundProtoMessage(msg)
 
-	if _, err = client.SendMessage(ctx, to, waMsg); err != nil {
-		return nil, fmt.Errorf("whatsapp send: %w", channels.ErrTemporary)
+	err = retrySend(ctx, waSendMaxRetries, waSendBaseBackoff, waSendMaxBackoff, func() error {
+		_, e := client.SendMessage(ctx, to, waMsg)
+		return e
+	})
+	if err != nil {
+		return nil, fmt.Errorf("whatsapp send: %w", err)
 	}
 	return nil, nil
+}
+
+// retrySend retries fn up to maxRetries times with exponential backoff and ±25% jitter.
+// Returns nil on success, channels.ErrSendFailed after exhaustion, or ctx.Err() on cancellation.
+func retrySend(ctx context.Context, maxRetries int, base, max time.Duration, fn func() error) error {
+	var lastErr error
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		lastErr = fn()
+		if lastErr == nil {
+			if attempt > 0 {
+				logger.InfoCF("whatsapp", "Send recovered after retries", map[string]any{"attempt": attempt})
+			}
+			return nil
+		}
+		if attempt == maxRetries {
+			break
+		}
+		backoff := time.Duration(float64(min(time.Duration(float64(base)*math.Pow(2, float64(attempt))), max)) * (0.75 + rand.Float64()*0.5))
+		select {
+		case <-time.After(backoff):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return channels.ErrSendFailed
 }
 
 // injectWidgetMetadata detects decision-point option lists in the message content

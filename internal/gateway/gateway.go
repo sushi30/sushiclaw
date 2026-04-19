@@ -21,10 +21,12 @@ import (
 	"github.com/sipeed/picoclaw/pkg/channels"
 	"github.com/sipeed/picoclaw/pkg/config"
 	"github.com/sipeed/picoclaw/pkg/health"
+	"github.com/sipeed/picoclaw/pkg/heartbeat"
 	"github.com/sipeed/picoclaw/pkg/logger"
 	"github.com/sipeed/picoclaw/pkg/media"
 	"github.com/sipeed/picoclaw/pkg/pid"
 	"github.com/sipeed/picoclaw/pkg/providers"
+	"github.com/sipeed/picoclaw/pkg/tools"
 )
 
 const (
@@ -171,6 +173,13 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 
 	go agentLoop.Run(ctx) //nolint:errcheck
 
+	hbService := heartbeat.NewHeartbeatService(cfg.WorkspacePath(), cfg.Heartbeat.Interval, cfg.Heartbeat.Enabled)
+	hbService.SetBus(agentBus)
+	hbService.SetHandler(createHeartbeatHandler(agentLoop))
+	if err = hbService.Start(); err != nil {
+		return fmt.Errorf("error starting heartbeat service: %w", err)
+	}
+
 	debugMgr := &DebugManager{agentLoop: agentLoop, externalBus: externalBus}
 
 	// Inbound bridge: intercept /debug and block unrecognized slash commands
@@ -226,6 +235,8 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), gracefulShutdownTimeout)
 	defer shutdownCancel()
 	_ = cm.StopAll(shutdownCtx)
+
+	hbService.Stop()
 
 	if cp, ok := provider.(providers.StatefulProvider); ok {
 		cp.Close()
@@ -326,4 +337,24 @@ func GetConfigPath() string {
 		return p
 	}
 	return filepath.Join(GetHome(), "config.json")
+}
+
+type heartbeatProcessor interface {
+	ProcessHeartbeat(ctx context.Context, content, channel, chatID string) (string, error)
+}
+
+func createHeartbeatHandler(proc heartbeatProcessor) heartbeat.HeartbeatHandler {
+	return func(prompt, channel, chatID string) *tools.ToolResult {
+		if channel == "" || chatID == "" {
+			channel, chatID = "cli", "direct"
+		}
+		response, err := proc.ProcessHeartbeat(context.Background(), prompt, channel, chatID)
+		if err != nil {
+			return tools.ErrorResult(fmt.Sprintf("Heartbeat error: %v", err))
+		}
+		if response == "HEARTBEAT_OK" {
+			return tools.SilentResult("Heartbeat OK")
+		}
+		return tools.SilentResult(response)
+	}
 }

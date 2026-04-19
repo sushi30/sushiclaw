@@ -339,12 +339,16 @@ func GetConfigPath() string {
 	return filepath.Join(GetHome(), "config.json")
 }
 
-func createHeartbeatHandler(agentLoop *agent.AgentLoop) heartbeat.HeartbeatHandler {
+type heartbeatProcessor interface {
+	ProcessHeartbeat(ctx context.Context, content, channel, chatID string) (string, error)
+}
+
+func createHeartbeatHandler(proc heartbeatProcessor) heartbeat.HeartbeatHandler {
 	return func(prompt, channel, chatID string) *tools.ToolResult {
 		if channel == "" || chatID == "" {
 			channel, chatID = "cli", "direct"
 		}
-		response, err := agentLoop.ProcessHeartbeat(context.Background(), prompt, channel, chatID)
+		response, err := proc.ProcessHeartbeat(context.Background(), prompt, channel, chatID)
 		if err != nil {
 			return tools.ErrorResult(fmt.Sprintf("Heartbeat error: %v", err))
 		}

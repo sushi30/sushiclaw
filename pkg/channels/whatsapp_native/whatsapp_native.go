@@ -47,9 +47,9 @@ const (
 	reconnectMax        = 5 * time.Minute
 	reconnectMultiplier = 2.0
 
-	waSendMaxRetries  = 5
+	waSendMaxRetries  = 10
 	waSendBaseBackoff = 500 * time.Millisecond
-	waSendMaxBackoff  = 30 * time.Second
+	waSendMaxBackoff  = 60 * time.Second
 )
 
 // WhatsAppNativeChannel implements the WhatsApp channel using whatsmeow (in-process, no external bridge).

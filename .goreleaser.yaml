@@ -1,0 +1,71 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+
+git:
+  ignore_tags:
+    - nightly
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: sushiclaw
+    env:
+      - CGO_ENABLED=0
+    tags:
+      - whatsapp_native
+    ldflags:
+      - -s -w
+      - -X github.com/sushi30/sushiclaw/internal/version.Version={{ .Version }}
+      - -X github.com/sushi30/sushiclaw/internal/version.GitCommit={{ .ShortCommit }}
+      - -X github.com/sushi30/sushiclaw/internal/version.BuildTime={{ .Date }}
+      - -X github.com/sushi30/sushiclaw/internal/version.GoVersion={{ with index .Env "GOVERSION" }}{{ . }}{{ else }}unknown{{ end }}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+dockers_v2:
+  - id: sushiclaw
+    dockerfile: docker/Dockerfile.goreleaser
+    ids:
+      - sushiclaw
+    images:
+      - ghcr.io/sushi30/sushiclaw
+    tags:
+      - "{{ .Version }}"
+      - latest
+    platforms:
+      - linux/amd64
+      - linux/arm64
+
+archives:
+  - formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+release:
+  footer: >-
+
+    ---
+
+    Released by [GoReleaser](https://github.com/goreleaser/goreleaser).

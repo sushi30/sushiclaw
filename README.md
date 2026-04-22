@@ -3,7 +3,7 @@
 Personal AI agent built on top of [picoclaw](https://github.com/sipeed/picoclaw).
 
 For general setup, configuration, and picoclaw concepts see the [picoclaw docs](https://github.com/sipeed/picoclaw).
-This README documents only what sushiclaw adds on top.
+This README documents only what sushiclaw adds on top. See [RELEASE.md](RELEASE.md) for versioning and release instructions.
 
 ---
 

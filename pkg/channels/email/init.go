@@ -2,12 +2,12 @@ package email
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 
-	"github.com/sipeed/picoclaw/pkg/bus"
-	"github.com/sipeed/picoclaw/pkg/channels"
-	"github.com/sushi30/sushiclaw/internal/envresolve"
+	"github.com/sushi30/sushiclaw/pkg/bus"
+	"github.com/sushi30/sushiclaw/pkg/channels"
 )
 
 // InitChannel loads email config, resolves env vars, and returns an initialized
@@ -52,19 +52,15 @@ func loadEmailConfig() (EmailConfig, error) {
 		return cfg, nil
 	}
 
-	// Optional fields — resolve silently, leave unresolved if env var missing.
-	envresolve.SecureString(&cfg.SMTPUser)
-	envresolve.SecureString(&cfg.SMTPPassword)
-
-	// Required fields — return an error if the env var is not set.
-	if err := envresolve.SecureStringRequired(&cfg.SMTPFrom); err != nil {
-		return EmailConfig{}, err
+	// Required fields — return an error if not set or unresolved env://.
+	if cfg.SMTPFrom.String() == "" || cfg.SMTPFrom.IsUnresolvedEnv() {
+		return EmailConfig{}, fmt.Errorf("smtp_from is required (unresolved: %s)", cfg.SMTPFrom.String())
 	}
-	if err := envresolve.SecureStringRequired(&cfg.IMAPUser); err != nil {
-		return EmailConfig{}, err
+	if cfg.IMAPUser.String() == "" || cfg.IMAPUser.IsUnresolvedEnv() {
+		return EmailConfig{}, fmt.Errorf("imap_user is required (unresolved: %s)", cfg.IMAPUser.String())
 	}
-	if err := envresolve.SecureStringRequired(&cfg.IMAPPassword); err != nil {
-		return EmailConfig{}, err
+	if cfg.IMAPPassword.String() == "" || cfg.IMAPPassword.IsUnresolvedEnv() {
+		return EmailConfig{}, fmt.Errorf("imap_password is required (unresolved: %s)", cfg.IMAPPassword.String())
 	}
 
 	return cfg, nil

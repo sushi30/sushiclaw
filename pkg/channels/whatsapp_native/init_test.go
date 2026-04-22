@@ -3,8 +3,8 @@ package whatsapp
 import (
 	"testing"
 
-	"github.com/sipeed/picoclaw/pkg/channels"
-	"github.com/sipeed/picoclaw/pkg/config"
+	"github.com/sushi30/sushiclaw/pkg/channels"
+	"github.com/sushi30/sushiclaw/pkg/config"
 )
 
 // TestFactoryRegisteredAsWhatsAppNative guards against re-registering the factory

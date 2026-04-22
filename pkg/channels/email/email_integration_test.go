@@ -16,9 +16,9 @@ import (
 	"github.com/emersion/go-imap/v2/imapserver"
 	"github.com/emersion/go-imap/v2/imapserver/imapmemserver"
 
-	"github.com/sipeed/picoclaw/pkg/bus"
-	"github.com/sipeed/picoclaw/pkg/channels"
-	"github.com/sipeed/picoclaw/pkg/config"
+	"github.com/sushi30/sushiclaw/pkg/bus"
+	"github.com/sushi30/sushiclaw/pkg/channels"
+	"github.com/sushi30/sushiclaw/pkg/config"
 )
 
 var subjectHexSuffixRe = regexp.MustCompile(`^Message \[([0-9a-f]{8})\]$`)

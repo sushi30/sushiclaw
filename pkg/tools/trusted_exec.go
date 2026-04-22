@@ -6,46 +6,29 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/sipeed/picoclaw/pkg/config"
-	pictools "github.com/sipeed/picoclaw/pkg/tools"
+	"github.com/Ingenimax/agent-sdk-go/pkg/interfaces"
+	"github.com/sushi30/sushiclaw/pkg/config"
+	"github.com/sushi30/sushiclaw/pkg/tools/exec"
 )
 
-// TrustedExecTool wraps picoclaw's ExecTool to allow specific chat IDs to
+// TrustedExecTool wraps exec.ExecTool to allow specific chat IDs to
 // bypass the remote-channel exec restriction. Configured via
 // SUSHICLAW_EXEC_ALLOWED_SENDERS (comma-separated chatIDs).
-//
-// When the inbound chatID matches an entry in allowedChatIDs, the command is
-// dispatched to an inner ExecTool built with AllowRemote=true. All other
-// callers use a restricted inner ExecTool that respects the config's
-// allow_remote setting.
 type TrustedExecTool struct {
 	allowedChatIDs []string
-	trusted        *pictools.ExecTool // AllowRemote=true
-	restricted     *pictools.ExecTool // respects config allow_remote
+	trusted        *exec.ExecTool // AllowRemote=true
+	restricted     *exec.ExecTool // respects config allow_remote
 }
 
-// NewTrustedExecTool creates a TrustedExecTool. allowedChatIDs is the list of
-// chatIDs that are permitted to run exec on remote channels.
+// NewTrustedExecTool creates a TrustedExecTool.
 func NewTrustedExecTool(
-	cfg *config.Config,
+	_ *config.Config,
 	workingDir string,
 	restrict bool,
 	allowedChatIDs []string,
 ) (*TrustedExecTool, error) {
-	restricted, err := pictools.NewExecToolWithConfig(workingDir, restrict, cfg)
-	if err != nil {
-		return nil, err
-	}
-
-	// Shallow copy is safe: Config.Tools.Exec is embedded by value all the way
-	// down. Only AllowRemote is mutated; pointer fields (sensitiveCache, etc.)
-	// are shared but only read by NewExecToolWithConfig.
-	trustedCfg := *cfg
-	trustedCfg.Tools.Exec.AllowRemote = true
-	trusted, err := pictools.NewExecToolWithConfig(workingDir, restrict, &trustedCfg)
-	if err != nil {
-		return nil, err
-	}
+	restricted := exec.NewExecTool(workingDir, restrict, false)
+	trusted := exec.NewExecTool(workingDir, restrict, true)
 
 	return &TrustedExecTool{
 		allowedChatIDs: allowedChatIDs,
@@ -54,14 +37,25 @@ func NewTrustedExecTool(
 	}, nil
 }
 
-func (t *TrustedExecTool) Name() string               { return "exec" }
-func (t *TrustedExecTool) Description() string        { return t.restricted.Description() }
-func (t *TrustedExecTool) Parameters() map[string]any { return t.restricted.Parameters() }
+func (t *TrustedExecTool) Name() string        { return "exec" }
+func (t *TrustedExecTool) Description() string { return t.restricted.Description() }
+func (t *TrustedExecTool) Parameters() map[string]interfaces.ParameterSpec {
+	return t.restricted.Parameters()
+}
 
-// Execute dispatches to the trusted inner tool when the caller's chatID is in
-// the allowlist, otherwise to the restricted inner tool.
-func (t *TrustedExecTool) Execute(ctx context.Context, args map[string]any) *pictools.ToolResult {
-	if slices.Contains(t.allowedChatIDs, pictools.ToolChatID(ctx)) {
+// Run executes the tool, dispatching to trusted or restricted based on chatID.
+func (t *TrustedExecTool) Run(ctx context.Context, input string) (string, error) {
+	chatID := exec.ChatIDFromContext(ctx)
+	if slices.Contains(t.allowedChatIDs, chatID) {
+		return t.trusted.Run(ctx, input)
+	}
+	return t.restricted.Run(ctx, input)
+}
+
+// Execute executes the tool with args JSON string.
+func (t *TrustedExecTool) Execute(ctx context.Context, args string) (string, error) {
+	chatID := exec.ChatIDFromContext(ctx)
+	if slices.Contains(t.allowedChatIDs, chatID) {
 		return t.trusted.Execute(ctx, args)
 	}
 	return t.restricted.Execute(ctx, args)

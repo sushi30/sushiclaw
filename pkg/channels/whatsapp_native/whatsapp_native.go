@@ -30,13 +30,13 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/google/uuid"
-	"github.com/sipeed/picoclaw/pkg/bus"
-	"github.com/sipeed/picoclaw/pkg/channels"
-	"github.com/sipeed/picoclaw/pkg/config"
-	"github.com/sipeed/picoclaw/pkg/identity"
-	"github.com/sipeed/picoclaw/pkg/logger"
-	"github.com/sipeed/picoclaw/pkg/media"
-	"github.com/sipeed/picoclaw/pkg/utils"
+	"github.com/sushi30/sushiclaw/pkg/bus"
+	"github.com/sushi30/sushiclaw/pkg/channels"
+	"github.com/sushi30/sushiclaw/pkg/config"
+	"github.com/sushi30/sushiclaw/pkg/identity"
+	"github.com/sushi30/sushiclaw/pkg/logger"
+	"github.com/sushi30/sushiclaw/pkg/media"
+	"github.com/sushi30/sushiclaw/pkg/utils"
 )
 
 const (

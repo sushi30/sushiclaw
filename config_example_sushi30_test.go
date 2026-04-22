@@ -7,9 +7,8 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/sipeed/picoclaw/pkg/config"
-
 	"github.com/sushi30/sushiclaw/pkg/channels/email"
+	"github.com/sushi30/sushiclaw/pkg/config"
 )
 
 func TestExampleConfigLoadsAsV2(t *testing.T) {
@@ -33,8 +32,8 @@ func TestExampleConfigLoadsAsV2(t *testing.T) {
 		t.Fatalf("LoadConfig: %v", err)
 	}
 
-	if cfg.Version != config.CurrentVersion {
-		t.Errorf("Version = %d, want %d", cfg.Version, config.CurrentVersion)
+	if cfg.Version != 2 {
+		t.Errorf("Version = %d, want 2", cfg.Version)
 	}
 
 	if len(cfg.ModelList) == 0 {
@@ -42,32 +41,32 @@ func TestExampleConfigLoadsAsV2(t *testing.T) {
 	}
 
 	// WhatsApp: use_native should be set (channel registered under "whatsapp_native" key)
-	waDecoded, err := cfg.Channels["whatsapp_native"].GetDecoded()
-	if err != nil {
-		t.Fatalf("decode whatsapp_native settings: %v", err)
+	waCh := cfg.Channels["whatsapp_native"]
+	if waCh == nil {
+		t.Fatal("whatsapp_native channel config missing")
 	}
-	waCfg, ok := waDecoded.(*config.WhatsAppSettings)
-	if !ok {
-		t.Fatal("whatsapp settings wrong type")
+	var waCfg config.WhatsAppSettings
+	if err := waCh.Decode(&waCfg); err != nil {
+		t.Fatalf("decode whatsapp_native settings: %v", err)
 	}
 	if !waCfg.UseNative {
 		t.Error("whatsapp use_native should be true in example config")
 	}
 
 	// Telegram: streaming should be configured
-	tgDecoded, err := cfg.Channels["telegram"].GetDecoded()
-	if err != nil {
-		t.Fatalf("decode telegram settings: %v", err)
+	tgCh := cfg.Channels["telegram"]
+	if tgCh == nil {
+		t.Fatal("telegram channel config missing")
 	}
-	tgCfg, ok := tgDecoded.(*config.TelegramSettings)
-	if !ok {
-		t.Fatal("telegram settings wrong type")
+	var tgCfg config.TelegramSettings
+	if err := tgCh.Decode(&tgCfg); err != nil {
+		t.Fatalf("decode telegram settings: %v", err)
 	}
 	if !tgCfg.Streaming.Enabled {
 		t.Error("telegram streaming.enabled should be true in example config")
 	}
 
-	// Email is wired separately via email.InitChannel (not through picoclaw's ChannelsConfig).
+	// Email is wired separately via email.InitChannel (not through ChannelsConfig).
 	// Decode email_channel directly into email.EmailConfig so json tag renames break this test.
 	var rawTop struct {
 		EmailChannel email.EmailConfig `json:"email_channel"`

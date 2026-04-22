@@ -14,10 +14,10 @@ import (
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/sipeed/picoclaw/pkg/bus"
-	"github.com/sipeed/picoclaw/pkg/channels"
-	"github.com/sipeed/picoclaw/pkg/config"
-	"github.com/sipeed/picoclaw/pkg/media"
+	"github.com/sushi30/sushiclaw/pkg/bus"
+	"github.com/sushi30/sushiclaw/pkg/channels"
+	"github.com/sushi30/sushiclaw/pkg/config"
+	"github.com/sushi30/sushiclaw/pkg/media"
 )
 
 // makeTestChannel creates a WhatsAppNativeChannel with no real whatsmeow client

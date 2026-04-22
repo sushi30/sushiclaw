@@ -4,6 +4,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	agentsdk "github.com/Ingenimax/agent-sdk-go/pkg/agent"
 	"github.com/Ingenimax/agent-sdk-go/pkg/interfaces"
@@ -21,22 +22,32 @@ type SessionManager struct {
 	bus   *bus.MessageBus
 }
 
-// NewSessionManager creates a session manager from config.
-func NewSessionManager(cfg *config.Config, messageBus *bus.MessageBus) (*SessionManager, error) {
+// BuildAgent creates an agent-sdk-go Agent from config and tools.
+func BuildAgent(cfg *config.Config, tools []interfaces.Tool) (*agentsdk.Agent, error) {
 	llmClient, err := createLLM(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("create LLM: %w", err)
 	}
 
-	var tools []interfaces.Tool
 	a, err := agentsdk.NewAgent(
 		agentsdk.WithName("sushiclaw"),
 		agentsdk.WithLLM(llmClient),
 		agentsdk.WithSystemPrompt("You are Sushiclaw, a helpful personal AI assistant."),
 		agentsdk.WithTools(tools...),
+		agentsdk.WithMemory(NewInMemoryMemory()),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create agent: %w", err)
+	}
+
+	return a, nil
+}
+
+// NewSessionManager creates a session manager from config.
+func NewSessionManager(cfg *config.Config, messageBus *bus.MessageBus) (*SessionManager, error) {
+	a, err := BuildAgent(cfg, nil)
+	if err != nil {
+		return nil, err
 	}
 
 	return &SessionManager{
@@ -50,6 +61,13 @@ func NewSessionManager(cfg *config.Config, messageBus *bus.MessageBus) (*Session
 // This is a no-op; tools must be passed during construction.
 func (sm *SessionManager) RegisterTool(t interfaces.Tool) {
 	logger.WarnC("agent", "RegisterTool is a no-op with agent-sdk-go; tools must be passed during construction")
+}
+
+// Chat runs a single turn against the agent and returns the response.
+// Bypasses the bus — useful for CLI REPL.
+func (sm *SessionManager) Chat(ctx context.Context, input string) (string, error) {
+	actx := exec.WithChatID(ctx, "cli")
+	return sm.agent.Run(actx, input)
 }
 
 // Run listens on the inbound bus channel and processes messages.
@@ -127,6 +145,9 @@ func createLLM(cfg *config.Config) (interfaces.LLM, error) {
 	apiKey := modelCfg.APIKeyString()
 	if apiKey == "" {
 		return nil, fmt.Errorf("no API key for model %q", modelName)
+	}
+	if strings.HasPrefix(apiKey, "env://") {
+		return nil, fmt.Errorf("env var %s is not set (model %q)", strings.TrimPrefix(apiKey, "env://"), modelName)
 	}
 
 	model := modelCfg.Model

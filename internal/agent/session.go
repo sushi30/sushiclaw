@@ -157,7 +157,13 @@ func createLLM(cfg *config.Config) (interfaces.LLM, error) {
 
 	baseURL := modelCfg.APIBase
 	if baseURL == "" {
-		baseURL = "https://api.openai.com/v1"
+		// Auto-detect provider from model prefix
+		switch {
+		case strings.HasPrefix(model, "openrouter/"):
+			baseURL = "https://openrouter.ai/api/v1"
+		default:
+			baseURL = "https://api.openai.com/v1"
+		}
 	}
 
 	// Use agent-sdk-go's OpenAI client as the default.

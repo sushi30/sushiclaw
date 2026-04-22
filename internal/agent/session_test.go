@@ -84,6 +84,26 @@ func TestBuildAgent_ModelNotFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "not found in model_list")
 }
 
+func TestBuildAgent_OpenRouterAutoBaseURL(t *testing.T) {
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{ModelName: "test-model"},
+		},
+		ModelList: []config.ModelConfig{
+			{
+				ModelName: "test-model",
+				Model:     "openrouter/z-ai/glm-4.5",
+				APIKey:    config.NewSecureString("test-key"),
+			},
+		},
+	}
+
+	// BuildAgent should succeed with the OpenRouter base URL auto-detected.
+	// The agent itself doesn't validate the key until first use.
+	_, err := agent.BuildAgent(cfg, nil)
+	require.NoError(t, err, "expected BuildAgent to succeed with OpenRouter auto-detected base URL")
+}
+
 func TestBuildAgent_NoAPIKey(t *testing.T) {
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{

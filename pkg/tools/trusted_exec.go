@@ -54,9 +54,9 @@ func NewTrustedExecTool(
 	}, nil
 }
 
-func (t *TrustedExecTool) Name() string                { return "exec" }
-func (t *TrustedExecTool) Description() string         { return t.restricted.Description() }
-func (t *TrustedExecTool) Parameters() map[string]any  { return t.restricted.Parameters() }
+func (t *TrustedExecTool) Name() string               { return "exec" }
+func (t *TrustedExecTool) Description() string        { return t.restricted.Description() }
+func (t *TrustedExecTool) Parameters() map[string]any { return t.restricted.Parameters() }
 
 // Execute dispatches to the trusted inner tool when the caller's chatID is in
 // the allowlist, otherwise to the restricted inner tool.

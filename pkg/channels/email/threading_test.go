@@ -121,7 +121,7 @@ func TestCleanSubject(t *testing.T) {
 		{"fwd: Hello", "Hello"},
 		{"Re: Fwd: Hello", "Hello"},
 		{"Re: Re: Hello", "Hello"},
-		{"Re:Hello", "Hello"},   // no space after colon
+		{"Re:Hello", "Hello"}, // no space after colon
 		{"Fwd:Hello", "Hello"},
 		{"  Re:  Hello  ", "Hello"},
 		{"Hello World", "Hello World"},

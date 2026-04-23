@@ -166,8 +166,8 @@ func TestDetectOptions(t *testing.T) {
 			wantOpts: nil,
 		},
 		{
-			name: "11 items exceeds maximum not detected",
-			input: "Which one?\n1. A\n2. B\n3. C\n4. D\n5. E\n6. F\n7. G\n8. H\n9. I\n10. J\n11. K",
+			name:     "11 items exceeds maximum not detected",
+			input:    "Which one?\n1. A\n2. B\n3. C\n4. D\n5. E\n6. F\n7. G\n8. H\n9. I\n10. J\n11. K",
 			wantOpts: nil,
 		},
 		{

@@ -3,6 +3,11 @@
 # ============================================================
 FROM golang:1.25-alpine AS builder
 
+ARG VERSION=dev
+ARG COMMIT=dev
+ARG BUILDTIME
+ARG GOVER
+
 WORKDIR /src
 
 # Cache go module dependencies
@@ -13,7 +18,13 @@ RUN go mod download
 
 # Copy source and build
 COPY . .
-RUN CGO_ENABLED=0 go build -o sushiclaw .
+RUN CGO_ENABLED=0 go build \
+    -tags whatsapp_native \
+    -ldflags "-X github.com/sushi30/sushiclaw/internal/version.Version=${VERSION} \
+              -X github.com/sushi30/sushiclaw/internal/version.GitCommit=${COMMIT} \
+              -X github.com/sushi30/sushiclaw/internal/version.BuildTime=${BUILDTIME} \
+              -X github.com/sushi30/sushiclaw/internal/version.GoVersion=${GOVER}" \
+    -o sushiclaw .
 
 # ============================================================
 # Stage 2: Minimal runtime image
@@ -24,7 +35,7 @@ RUN apk add --no-cache ca-certificates tzdata
 
 # Health check (picoclaw health server runs on 18790)
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-  CMD wget -q --spider http://localhost:18790/health || exit 1
+    CMD wget -q --spider http://localhost:18790/health || exit 1
 
 COPY --from=builder /src/sushiclaw /usr/local/bin/sushiclaw
 

@@ -1,11 +1,16 @@
-BINARY := sushiclaw
+BINARY      := sushiclaw
 INSTALL_DIR := $(HOME)/.local/bin
-
-GIT_COMMIT := $(shell git rev-parse --short=8 HEAD 2>/dev/null || echo "dev")
+VERSION     ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo dev)
+COMMIT      := $(shell git rev-parse --short=8 HEAD 2>/dev/null || echo dev)
+BUILDTIME   := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+GOVER       := $(shell go version | awk '{print $$3}')
 VERSION_PKG := github.com/sushi30/sushiclaw/internal/version
-LDFLAGS := -X $(VERSION_PKG).GitCommit=$(GIT_COMMIT)
+LDFLAGS     := -X $(VERSION_PKG).Version=$(VERSION) \
+               -X $(VERSION_PKG).GitCommit=$(COMMIT) \
+               -X $(VERSION_PKG).BuildTime=$(BUILDTIME) \
+               -X $(VERSION_PKG).GoVersion=$(GOVER)
 
-.PHONY: build test install lint fmt vet deps sync-picoclaw test-integration
+.PHONY: build test install lint fmt vet deps sync-picoclaw test-integration release-check
 
 build:
 	CGO_ENABLED=0 go build -tags whatsapp_native -ldflags "$(LDFLAGS)" -o $(BINARY) .
@@ -34,3 +39,7 @@ sync-picoclaw:
 
 test-integration:
 	go test -v -run 'TestEmailInboundPipeline|TestEmailOutboundPipeline' ./pkg/channels/email/...
+
+release-check:
+	@test "$(VERSION)" != "dev" || (echo "ERROR: no git tag found, set VERSION= explicitly" && exit 1)
+	@echo "Releasing $(VERSION) from commit $(COMMIT)"

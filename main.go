@@ -38,10 +38,10 @@ func newVersionCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:     "version",
 		Aliases: []string{"v"},
-		Short:   "Print build commit hash",
+		Short:   "Print build version info",
 		Args:    cobra.NoArgs,
 		Run: func(_ *cobra.Command, _ []string) {
-			fmt.Println(version.GitCommit)
+			fmt.Println(version.FormatVersion())
 		},
 	}
 }

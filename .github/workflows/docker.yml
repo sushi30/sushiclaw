@@ -32,19 +32,34 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Compute short SHA
-        id: sha
+      - name: Compute build metadata
+        id: meta
         shell: bash
-        run: echo "short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "commit=${GITHUB_SHA::8}" >> "$GITHUB_OUTPUT"
+          echo "builttime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Compute Go version
+        id: gover
+        run: echo "version=$(go version | awk '{print $3}')" >> "$GITHUB_OUTPUT"
 
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
+          build-args: |
+            VERSION=dev
+            COMMIT=${{ steps.meta.outputs.commit }}
+            BUILDTIME=${{ steps.meta.outputs.builttime }}
+            GOVER=${{ steps.gover.outputs.version }}
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ steps.sha.outputs.short }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:dev-${{ steps.meta.outputs.commit }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64,linux/arm64

@@ -12,6 +12,7 @@ import (
 
 	"github.com/sushi30/sushiclaw/pkg/bus"
 	"github.com/sushi30/sushiclaw/pkg/config"
+	"github.com/sushi30/sushiclaw/pkg/llm/openrouter"
 	"github.com/sushi30/sushiclaw/pkg/logger"
 	"github.com/sushi30/sushiclaw/pkg/tools/exec"
 )
@@ -155,23 +156,17 @@ func createLLM(cfg *config.Config) (interfaces.LLM, error) {
 		model = modelName
 	}
 
-	baseURL := modelCfg.APIBase
-	if baseURL == "" {
-		// Auto-detect provider from model prefix
-		switch {
-		case strings.HasPrefix(model, "openrouter/"):
-			baseURL = "https://openrouter.ai/api/v1"
-		default:
-			baseURL = "https://api.openai.com/v1"
+	// Dispatch to provider based on model prefix.
+	switch {
+	case strings.HasPrefix(model, "openrouter/"):
+		return openrouter.NewClient(apiKey, openrouter.WithModel(model)), nil
+	default:
+		opts := []openai.Option{openai.WithModel(model)}
+		if modelCfg.APIBase != "" {
+			opts = append(opts, openai.WithBaseURL(modelCfg.APIBase))
 		}
+		return openai.NewClient(apiKey, opts...), nil
 	}
-
-	// Use agent-sdk-go's OpenAI client as the default.
-	client := openai.NewClient(apiKey,
-		openai.WithModel(model),
-		openai.WithBaseURL(baseURL),
-	)
-	return client, nil
 }
 
 func truncate(s string, maxLen int) string {

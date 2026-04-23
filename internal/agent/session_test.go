@@ -104,6 +104,25 @@ func TestBuildAgent_OpenRouterAutoBaseURL(t *testing.T) {
 	require.NoError(t, err, "expected BuildAgent to succeed with OpenRouter auto-detected base URL")
 }
 
+func TestBuildAgent_DefaultOpenAI(t *testing.T) {
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{ModelName: "test-model"},
+		},
+		ModelList: []config.ModelConfig{
+			{
+				ModelName: "test-model",
+				Model:     "gpt-4o",
+				APIKey:    config.NewSecureString("test-key"),
+			},
+		},
+	}
+
+	// BuildAgent should succeed for default (non-OpenRouter) models.
+	_, err := agent.BuildAgent(cfg, nil)
+	require.NoError(t, err, "expected BuildAgent to succeed with default OpenAI provider")
+}
+
 func TestBuildAgent_NoAPIKey(t *testing.T) {
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{

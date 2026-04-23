@@ -30,10 +30,28 @@ func BuildAgent(cfg *config.Config, tools []interfaces.Tool) (*agentsdk.Agent, e
 		return nil, fmt.Errorf("create LLM: %w", err)
 	}
 
+	systemPrompt := "You are Sushiclaw, a helpful personal AI assistant."
+	if ws := cfg.WorkspacePath(); ws != "" {
+		cb := NewContextBuilder(ws)
+		if p, err := cb.BuildSystemPromptWithCache(); err == nil && p != "" {
+			systemPrompt = p
+		}
+	}
+
+	toolNames := make([]string, len(tools))
+	for i, t := range tools {
+		toolNames[i] = t.Name()
+	}
+	logger.DebugCF("agent", "Building agent", map[string]any{
+		"workspace":     cfg.WorkspacePath(),
+		"prompt_length": len(systemPrompt),
+		"tools":         toolNames,
+	})
+
 	a, err := agentsdk.NewAgent(
 		agentsdk.WithName("sushiclaw"),
 		agentsdk.WithLLM(llmClient),
-		agentsdk.WithSystemPrompt("You are Sushiclaw, a helpful personal AI assistant."),
+		agentsdk.WithSystemPrompt(systemPrompt),
 		agentsdk.WithTools(tools...),
 		agentsdk.WithMemory(NewInMemoryMemory()),
 	)

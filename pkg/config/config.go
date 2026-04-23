@@ -223,12 +223,22 @@ func LoadConfig(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-// WorkspacePath returns the agent workspace directory.
+// WorkspacePath returns the agent workspace directory with ~ expanded.
 func (c *Config) WorkspacePath() string {
-	if c.Agents.Defaults.Workspace != "" {
-		return c.Agents.Defaults.Workspace
+	p := c.Agents.Defaults.Workspace
+	if p == "" {
+		p = GetHome() + "/workspace"
 	}
-	return GetHome() + "/workspace"
+	return expandHome(p)
+}
+
+// expandHome replaces a leading ~ with the user's home directory.
+func expandHome(p string) string {
+	if p == "~" || strings.HasPrefix(p, "~/") {
+		home, _ := os.UserHomeDir()
+		return home + p[1:]
+	}
+	return p
 }
 
 // Voice returns a zero VoiceConfig (sushiclaw doesn't configure voice globally).

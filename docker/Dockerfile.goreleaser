@@ -5,7 +5,8 @@ RUN apk add --no-cache ca-certificates tzdata
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
     CMD wget -q --spider http://localhost:18790/health || exit 1
 
-COPY sushiclaw /usr/local/bin/sushiclaw
+ARG TARGETARCH
+COPY linux/${TARGETARCH}/sushiclaw /usr/local/bin/sushiclaw
 
 RUN addgroup -g 1000 sushiclaw && \
     adduser -D -u 1000 -G sushiclaw sushiclaw

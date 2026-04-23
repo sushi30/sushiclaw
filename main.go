@@ -9,8 +9,12 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/sushi30/sushiclaw/internal/chat"
+	"github.com/sushi30/sushiclaw/internal/envresolve"
 	"github.com/sushi30/sushiclaw/internal/gateway"
 	"github.com/sushi30/sushiclaw/internal/version"
+	"github.com/sushi30/sushiclaw/pkg/config"
+	"github.com/sushi30/sushiclaw/pkg/logger"
 
 	// Register owned channel implementations.
 	_ "github.com/sushi30/sushiclaw/pkg/channels/telegram"
@@ -31,6 +35,7 @@ func newRootCommand() *cobra.Command {
 	}
 	cmd.AddCommand(newGatewayCommand())
 	cmd.AddCommand(newVersionCommand())
+	cmd.AddCommand(newChatCommand())
 	return cmd
 }
 
@@ -62,6 +67,43 @@ func newGatewayCommand() *cobra.Command {
 
 	cmd.Flags().BoolVarP(&debug, "debug", "d", false, "Enable debug logging")
 	cmd.Flags().BoolVarP(&allowEmpty, "allow-empty", "E", false, "Start even without a default model configured")
+
+	return cmd
+}
+
+func newChatCommand() *cobra.Command {
+	var debug bool
+
+	cmd := &cobra.Command{
+		Use:     "chat",
+		Aliases: []string{"c"},
+		Short:   "Start an interactive terminal chat with the agent",
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if debug {
+				logger.SetLevel(logger.DEBUG)
+			}
+
+			cfg, err := config.LoadConfig(gateway.GetConfigPath())
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
+			envresolve.Config(cfg)
+
+			if cfg.Agents.Defaults.ModelName == "" {
+				return fmt.Errorf("no default model configured (set model_name in config)")
+			}
+
+			runner, err := chat.NewRunner(cfg)
+			if err != nil {
+				return err
+			}
+
+			return runner.Run(cmd.Context())
+		},
+	}
+
+	cmd.Flags().BoolVarP(&debug, "debug", "d", false, "Enable debug logging")
 
 	return cmd
 }

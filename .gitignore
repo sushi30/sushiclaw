@@ -27,3 +27,6 @@ go.work.sum
 .vscode/
 *.swp
 *.swo
+
+coverage.html
+coverage.out

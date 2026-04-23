@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sipeed/picoclaw/pkg/config"
+	"github.com/sushi30/sushiclaw/pkg/config"
 )
 
 // TestLoadExampleConfig verifies that config.example.json is a valid config

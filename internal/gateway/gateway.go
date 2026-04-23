@@ -6,27 +6,19 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
+	"github.com/sushi30/sushiclaw/internal/agent"
 	"github.com/sushi30/sushiclaw/internal/commandfilter"
 	"github.com/sushi30/sushiclaw/internal/envresolve"
+	"github.com/sushi30/sushiclaw/pkg/bus"
+	"github.com/sushi30/sushiclaw/pkg/channels"
 	"github.com/sushi30/sushiclaw/pkg/channels/email"
+	"github.com/sushi30/sushiclaw/pkg/config"
+	"github.com/sushi30/sushiclaw/pkg/logger"
+	"github.com/sushi30/sushiclaw/pkg/media"
 	sushitools "github.com/sushi30/sushiclaw/pkg/tools"
-
-	"github.com/sipeed/picoclaw/pkg/agent"
-	"github.com/sipeed/picoclaw/pkg/audio/asr"
-	"github.com/sipeed/picoclaw/pkg/bus"
-	"github.com/sipeed/picoclaw/pkg/channels"
-	"github.com/sipeed/picoclaw/pkg/config"
-	"github.com/sipeed/picoclaw/pkg/health"
-	"github.com/sipeed/picoclaw/pkg/heartbeat"
-	"github.com/sipeed/picoclaw/pkg/logger"
-	"github.com/sipeed/picoclaw/pkg/media"
-	"github.com/sipeed/picoclaw/pkg/pid"
-	"github.com/sipeed/picoclaw/pkg/providers"
-	"github.com/sipeed/picoclaw/pkg/tools"
 )
 
 const (
@@ -57,10 +49,6 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 	}
 	envresolve.Config(cfg)
 
-	if cfg.Gateway.Port <= 0 || cfg.Gateway.Port > 65535 {
-		return fmt.Errorf("invalid gateway port: %d", cfg.Gateway.Port)
-	}
-
 	if debug {
 		logger.SetLevel(logger.DEBUG)
 		fmt.Println("Debug mode enabled")
@@ -68,32 +56,22 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 		logger.SetLevelFromString(cfg.Gateway.LogLevel)
 	}
 
-	pidData, err := pid.WritePidFile(homePath, cfg.Gateway.Host, cfg.Gateway.Port)
-	if err != nil {
-		return fmt.Errorf("singleton check failed: %w", err)
-	}
-	defer pid.RemovePidFile(homePath)
-
-	provider, modelID, err := createProvider(cfg, allowEmptyStartup)
-	if err != nil {
-		return fmt.Errorf("error creating provider: %w", err)
-	}
-	if modelID != "" {
-		cfg.Agents.Defaults.ModelName = modelID
+	if cfg.Agents.Defaults.ModelName == "" && !allowEmptyStartup {
+		return fmt.Errorf("no default model configured (use --allow-empty to start without a model)")
 	}
 
-	provider = wrapWithRetryEmpty(provider)
-
-	// externalBus: channels publish inbound here; channel manager reads outbound from here.
-	// agentBus: agent loop reads inbound from here; publishes outbound here.
-	// Bridge goroutines intercept inbound messages (blocking unrecognized slash
-	// commands and handling /debug) before forwarding to agentBus, and proxy
-	// outbound responses back to externalBus.
-	externalBus := bus.NewMessageBus()
-	agentBus := bus.NewMessageBus()
+	// Single bus architecture: all channels and the agent share one MessageBus.
+	messageBus := bus.NewMessageBus()
 	cmdFilter := commandfilter.NewCommandFilter()
 
-	agentLoop := agent.NewAgentLoop(cfg, agentBus, provider)
+	sessionMgr, err := agent.NewSessionManager(cfg, messageBus)
+	if err != nil {
+		if allowEmptyStartup {
+			logger.WarnC("gateway", fmt.Sprintf("Failed to create agent session: %v", err))
+		} else {
+			return fmt.Errorf("error creating agent session: %w", err)
+		}
+	}
 
 	if allowedSenders := sushitools.ParseAllowedSenders(); len(allowedSenders) > 0 {
 		if cfg.Tools.IsToolEnabled("exec") {
@@ -104,18 +82,12 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 				logger.WarnCF("gateway", "Failed to init trusted exec tool",
 					map[string]any{"error": err.Error()})
 			} else {
-				agentLoop.RegisterTool(trustedExec)
+				sessionMgr.RegisterTool(trustedExec)
 				logger.InfoCF("gateway", "Trusted exec registered",
 					map[string]any{"senders": allowedSenders})
 			}
 		}
 	}
-
-	startupInfo := agentLoop.GetStartupInfo()
-	toolsInfo := startupInfo["tools"].(map[string]any)
-	skillsInfo := startupInfo["skills"].(map[string]any)
-	fmt.Printf("\nAgent Status:\n  Tools: %d loaded\n  Skills: %d/%d available\n",
-		toolsInfo["count"], skillsInfo["available"], skillsInfo["total"])
 
 	mediaStore := media.NewFileMediaStoreWithCleanup(media.MediaCleanerConfig{
 		Enabled:  cfg.Tools.MediaCleanup.Enabled,
@@ -125,12 +97,12 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 	mediaStore.Start()
 	defer mediaStore.Stop()
 
-	cm, err := channels.NewManager(cfg, externalBus, mediaStore)
+	cm, err := channels.NewManager(cfg, messageBus, mediaStore)
 	if err != nil {
 		return fmt.Errorf("error creating channel manager: %w", err)
 	}
 
-	emailCh, err := email.InitChannel(externalBus)
+	emailCh, err := email.InitChannel(messageBus)
 	if err != nil {
 		return fmt.Errorf("email channel: %w", err)
 	}
@@ -138,17 +110,7 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 		cm.RegisterChannel("email", emailCh)
 	}
 
-	// Also register the channel manager as stream delegate on agentBus so that
-	// the agent loop's streaming queries (al.bus.GetStreamer) reach the manager.
-	agentBus.SetStreamDelegate(cm)
-
-	agentLoop.SetChannelManager(cm)
-	agentLoop.SetMediaStore(mediaStore)
-
-	if transcriber := asr.DetectTranscriber(cfg); transcriber != nil {
-		agentLoop.SetTranscriber(transcriber)
-		logger.InfoCF("voice", "Transcription enabled", map[string]any{"provider": transcriber.Name()})
-	}
+	messageBus.SetStreamDelegate(cm)
 
 	enabledChannels := cm.GetEnabledChannels()
 	if len(enabledChannels) > 0 {
@@ -157,71 +119,47 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 		fmt.Println("Warning: no channels enabled")
 	}
 
-	addr := fmt.Sprintf("%s:%d", cfg.Gateway.Host, cfg.Gateway.Port)
-	healthServer := health.NewServer(cfg.Gateway.Host, cfg.Gateway.Port, pidData.Token)
-	cm.SetupHTTPServer(addr, healthServer)
-
 	if err = cm.StartAll(context.Background()); err != nil {
 		return fmt.Errorf("error starting channels: %w", err)
 	}
 
-	fmt.Printf("Gateway started on %s:%d\n", cfg.Gateway.Host, cfg.Gateway.Port)
+	fmt.Printf("Gateway started\n")
 	fmt.Println("Press Ctrl+C to stop")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go agentLoop.Run(ctx) //nolint:errcheck
-
-	hbService := heartbeat.NewHeartbeatService(cfg.WorkspacePath(), cfg.Heartbeat.Interval, cfg.Heartbeat.Enabled)
-	hbService.SetBus(agentBus)
-	hbService.SetHandler(createHeartbeatHandler(agentLoop))
-	if err = hbService.Start(); err != nil {
-		return fmt.Errorf("error starting heartbeat service: %w", err)
+	if sessionMgr != nil {
+		go sessionMgr.Run(ctx)
 	}
 
-	debugMgr := &DebugManager{agentLoop: agentLoop, externalBus: externalBus}
-
-	// Inbound bridge: intercept /debug and block unrecognized slash commands
-	// before forwarding valid messages to agentBus for normal agent-loop processing.
+	// Inbound processing: filter commands, then publish to bus for agent.
 	go func() {
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case msg, ok := <-externalBus.InboundChan():
+			case msg, ok := <-messageBus.InboundChan():
 				if !ok {
 					return
 				}
-				handleInbound(ctx, msg, cmdFilter, debugMgr, agentBus, externalBus)
-			}
-		}
-	}()
-
-	// Outbound bridge: forward agent responses and media back to channels.
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case msg, ok := <-agentBus.OutboundChan():
-				if !ok {
-					return
+				dec := cmdFilter.Filter(msg)
+				if dec.Result == commandfilter.Block {
+					logger.InfoCF("commandfilter", "Blocked unrecognized slash command",
+						map[string]any{
+							"channel": msg.Channel,
+							"chat_id": msg.ChatID,
+							"command": dec.Command,
+						})
+					_ = messageBus.PublishOutbound(ctx, bus.OutboundMessage{
+						Channel: msg.Channel,
+						ChatID:  msg.ChatID,
+						Content: dec.ErrMsg,
+					})
+					continue
 				}
-				_ = externalBus.PublishOutbound(ctx, injectDebugIntoHelp(msg))
-			}
-		}
-	}()
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case msg, ok := <-agentBus.OutboundMediaChan():
-				if !ok {
-					return
-				}
-				_ = externalBus.PublishOutboundMedia(ctx, msg)
+				// Re-publish to bus so agent session can pick it up.
+				_ = messageBus.PublishInbound(ctx, msg)
 			}
 		}
 	}()
@@ -236,87 +174,10 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 	defer shutdownCancel()
 	_ = cm.StopAll(shutdownCtx)
 
-	hbService.Stop()
-
-	if cp, ok := provider.(providers.StatefulProvider); ok {
-		cp.Close()
-	}
-	agentLoop.Stop()
-	agentLoop.Close()
-	agentBus.Close()
-	externalBus.Close()
+	messageBus.Close()
 
 	logger.Info("Gateway stopped")
 	return nil
-}
-
-// injectDebugIntoHelp appends the /debug entry to outbound help responses.
-// Detection uses the stable marker "/help - Show this help message" that
-// picoclaw's formatHelpMessage always produces for the built-in /help command.
-func injectDebugIntoHelp(msg bus.OutboundMessage) bus.OutboundMessage {
-	if strings.Contains(msg.Content, "/help - Show this help message") {
-		msg.Content += "\n/debug - Toggle debug event forwarding to this chat"
-	}
-	return msg
-}
-
-// handleInbound processes a single inbound message from externalBus.
-// Unrecognized slash commands are blocked with an error reply.
-// /debug is intercepted and handled by debugMgr.
-// All other messages are forwarded to agentBus for normal agent-loop processing.
-func handleInbound(ctx context.Context, msg bus.InboundMessage, cmdFilter *commandfilter.CommandFilter, debugMgr *DebugManager, agentBus, externalBus *bus.MessageBus) {
-	// Block unrecognized slash commands before they reach the agent loop.
-	dec := cmdFilter.Filter(msg)
-	if dec.Result == commandfilter.Block {
-		logger.InfoCF("commandfilter", "Blocked unrecognized slash command",
-			map[string]any{
-				"channel": msg.Channel,
-				"chat_id": msg.ChatID,
-				"command": dec.Command,
-			})
-		_ = externalBus.PublishOutbound(ctx, bus.OutboundMessage{
-			Channel: msg.Channel,
-			ChatID:  msg.ChatID,
-			Content: dec.ErrMsg,
-		})
-		return
-	}
-
-	// Handle /debug toggle.
-	if strings.TrimSpace(msg.Content) == "/debug" {
-		reply := debugMgr.Toggle(ctx, msg.Channel, msg.ChatID)
-		_ = externalBus.PublishOutbound(ctx, bus.OutboundMessage{
-			Channel: msg.Channel,
-			ChatID:  msg.ChatID,
-			Content: reply,
-		})
-		return
-	}
-
-	_ = agentBus.PublishInbound(ctx, msg)
-}
-
-type startupBlockedProvider struct{ reason string }
-
-func (p *startupBlockedProvider) Chat(
-	_ context.Context,
-	_ []providers.Message,
-	_ []providers.ToolDefinition,
-	_ string,
-	_ map[string]any,
-) (*providers.LLMResponse, error) {
-	return nil, fmt.Errorf("%s", p.reason)
-}
-
-func (p *startupBlockedProvider) GetDefaultModel() string { return "" }
-
-func createProvider(cfg *config.Config, allowEmptyStartup bool) (providers.LLMProvider, string, error) {
-	if cfg.Agents.Defaults.GetModelName() == "" && allowEmptyStartup {
-		reason := "no default model configured; gateway started in limited mode"
-		fmt.Printf("Warning: %s\n", reason)
-		return &startupBlockedProvider{reason: reason}, "", nil
-	}
-	return providers.CreateProvider(cfg)
 }
 
 // GetHome returns the sushiclaw home directory.
@@ -333,28 +194,6 @@ func GetConfigPath() string {
 	if p := os.Getenv("SUSHICLAW_CONFIG"); p != "" {
 		return p
 	}
-	if p := os.Getenv(config.EnvConfig); p != "" {
-		return p
-	}
 	return filepath.Join(GetHome(), "config.json")
 }
 
-type heartbeatProcessor interface {
-	ProcessHeartbeat(ctx context.Context, content, channel, chatID string) (string, error)
-}
-
-func createHeartbeatHandler(proc heartbeatProcessor) heartbeat.HeartbeatHandler {
-	return func(prompt, channel, chatID string) *tools.ToolResult {
-		if channel == "" || chatID == "" {
-			channel, chatID = "cli", "direct"
-		}
-		response, err := proc.ProcessHeartbeat(context.Background(), prompt, channel, chatID)
-		if err != nil {
-			return tools.ErrorResult(fmt.Sprintf("Heartbeat error: %v", err))
-		}
-		if response == "HEARTBEAT_OK" {
-			return tools.SilentResult("Heartbeat OK")
-		}
-		return tools.SilentResult(response)
-	}
-}

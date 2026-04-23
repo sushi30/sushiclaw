@@ -3,8 +3,8 @@ package commandfilter
 import (
 	"fmt"
 
-	"github.com/sipeed/picoclaw/pkg/bus"
-	"github.com/sipeed/picoclaw/pkg/commands"
+	"github.com/sushi30/sushiclaw/pkg/bus"
+	"github.com/sushi30/sushiclaw/pkg/commands"
 )
 
 type CommandFilter struct {

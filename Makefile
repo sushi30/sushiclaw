@@ -18,6 +18,18 @@ build:
 test:
 	go test ./...
 
+test-cover:
+	@go test -coverprofile=coverage.osut ./... > /dev/null 2>&1 || true
+	@echo "---"
+	@echo "Coverage summary:"
+	@go tool cover -func=coverage.out
+
+coverage-html: test-cover
+	go tool cover -html=coverage.out -o coverage.html
+	@echo "Coverage report written to coverage.html"
+
+coverage: coverage-html
+
 install: build
 	cp $(BINARY) $(INSTALL_DIR)/$(BINARY)
 

@@ -3,7 +3,7 @@ package commandfilter
 import (
 	"testing"
 
-	"github.com/sipeed/picoclaw/pkg/bus"
+	"github.com/sushi30/sushiclaw/pkg/bus"
 )
 
 func msg(content string) bus.InboundMessage {

@@ -12,8 +12,6 @@ WORKDIR /src
 
 # Cache go module dependencies
 COPY go.mod go.sum ./
-# Copy picoclaw submodule — resolves the go.mod replace directive (./picoclaw)
-COPY picoclaw/ picoclaw/
 RUN go mod download
 
 # Copy source and build

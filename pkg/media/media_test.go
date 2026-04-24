@@ -83,7 +83,9 @@ func TestFileMediaStore_ReleaseAll(t *testing.T) {
 	s := NewFileMediaStore()
 
 	tmpFile := filepath.Join(t.TempDir(), "release.txt")
-	os.WriteFile(tmpFile, []byte("hello"), 0o600)
+	if err := os.WriteFile(tmpFile, []byte("hello"), 0o600); err != nil {
+		t.Fatalf("create test file: %v", err)
+	}
 
 	ref, _ := s.Store(tmpFile, MediaMeta{Filename: "release.txt", CleanupPolicy: CleanupPolicyDeleteOnCleanup}, "scope1")
 
@@ -116,7 +118,9 @@ func TestFileMediaStore_CleanExpired(t *testing.T) {
 	s.nowFunc = func() time.Time { return oldTime }
 
 	tmpFile := filepath.Join(t.TempDir(), "old.txt")
-	os.WriteFile(tmpFile, []byte("old"), 0o600)
+	if err := os.WriteFile(tmpFile, []byte("old"), 0o600); err != nil {
+		t.Fatalf("create test file: %v", err)
+	}
 
 	ref, _ := s.Store(tmpFile, MediaMeta{Filename: "old.txt", CleanupPolicy: CleanupPolicyDeleteOnCleanup}, "scope1")
 
@@ -144,7 +148,9 @@ func TestFileMediaStore_CleanExpired_NotExpired(t *testing.T) {
 	})
 
 	tmpFile := filepath.Join(t.TempDir(), "fresh.txt")
-	os.WriteFile(tmpFile, []byte("fresh"), 0o600)
+	if err := os.WriteFile(tmpFile, []byte("fresh"), 0o600); err != nil {
+		t.Fatalf("create test file: %v", err)
+	}
 
 	ref, _ := s.Store(tmpFile, MediaMeta{Filename: "fresh.txt"}, "scope1")
 

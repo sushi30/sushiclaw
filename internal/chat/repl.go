@@ -60,12 +60,12 @@ func (r *Runner) SetOutput(w io.Writer) {
 }
 
 func (r *Runner) Run(ctx context.Context) error {
-	fmt.Fprintln(r.out, "Sushiclaw Chat")
-	fmt.Fprintln(r.out, "Type /quit to exit, /help for commands")
-	fmt.Fprintln(r.out)
+	_, _ = fmt.Fprintln(r.out, "Sushiclaw Chat")
+	_, _ = fmt.Fprintln(r.out, "Type /quit to exit, /help for commands")
+	_, _ = fmt.Fprintln(r.out)
 
 	for {
-		fmt.Fprint(r.out, "> ")
+		_, _ = fmt.Fprint(r.out, "> ")
 		if !r.scanner.Scan() {
 			break
 		}
@@ -89,32 +89,33 @@ func (r *Runner) Run(ctx context.Context) error {
 		actx := exec.WithChatID(ctx, "cli")
 		response, err := r.agent.Run(actx, line)
 		if err != nil {
-			fmt.Fprintf(r.out, "Error: %v\n", err)
+			_, _ = fmt.Fprintf(r.out, "Error: %v\n", err)
 			continue
 		}
 
-		fmt.Fprintln(r.out, response)
+		_, _ = fmt.Fprintln(r.out, response)
 	}
 
 	return r.scanner.Err()
 }
 
 func (r *Runner) handleCommand(ctx context.Context, line string) (bool, error) {
+	_ = ctx
 	switch line {
 	case "/quit", "/q", "/exit":
-		fmt.Fprintln(r.out, "Goodbye!")
+		_, _ = fmt.Fprintln(r.out, "Goodbye!")
 		return true, ErrQuit
 	case "/clear":
 		// In-memory memory is per-agent-instance, so "clear" just means
 		// we can't easily clear it without access to the memory interface.
 		// For now, tell the user.
-		fmt.Fprintln(r.out, "Note: history is in-memory per session. Restart to clear.")
+		_, _ = fmt.Fprintln(r.out, "Note: history is in-memory per session. Restart to clear.")
 		return true, nil
 	case "/help", "/h":
-		fmt.Fprintln(r.out, "Commands:")
-		fmt.Fprintln(r.out, "  /quit    Exit the REPL")
-		fmt.Fprintln(r.out, "  /clear   Note about history")
-		fmt.Fprintln(r.out, "  /help    Show this help")
+		_, _ = fmt.Fprintln(r.out, "Commands:")
+		_, _ = fmt.Fprintln(r.out, "  /quit    Exit the REPL")
+		_, _ = fmt.Fprintln(r.out, "  /clear   Note about history")
+		_, _ = fmt.Fprintln(r.out, "  /help    Show this help")
 		return true, nil
 	}
 	return false, nil

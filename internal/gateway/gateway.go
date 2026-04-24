@@ -15,6 +15,7 @@ import (
 	"github.com/sushi30/sushiclaw/pkg/bus"
 	"github.com/sushi30/sushiclaw/pkg/channels"
 	"github.com/sushi30/sushiclaw/pkg/channels/email"
+	"github.com/sushi30/sushiclaw/pkg/commands"
 	"github.com/sushi30/sushiclaw/pkg/config"
 	"github.com/sushi30/sushiclaw/pkg/logger"
 	"github.com/sushi30/sushiclaw/pkg/media"
@@ -63,6 +64,11 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 	// Single bus architecture: all channels and the agent share one MessageBus.
 	messageBus := bus.NewMessageBus()
 	cmdFilter := commandfilter.NewCommandFilter()
+
+	reg := commands.NewRegistry(commands.BuiltinDefinitions())
+	rt := &commands.Runtime{
+		ListDefinitions: reg.Definitions,
+	}
 
 	sessionMgr, err := agent.NewSessionManager(cfg, messageBus)
 	if err != nil {
@@ -130,10 +136,17 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 	defer cancel()
 
 	if sessionMgr != nil {
+		rt.ClearHistory = sessionMgr.ClearHistory
+		rt.GetModelInfo = sessionMgr.GetModelInfo
+	}
+	executor := commands.NewExecutor(reg, rt)
+
+	if sessionMgr != nil {
 		go sessionMgr.Run(ctx)
 	}
 
-	// Inbound processing: filter commands, then publish to bus for agent.
+	// Inbound processing: filter commands, execute handled ones locally,
+	// forward the rest to the agent session.
 	go func() {
 		for {
 			select {
@@ -158,6 +171,29 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 					})
 					continue
 				}
+
+				if commands.HasCommandPrefix(msg.Content) {
+					var reply string
+					result := executor.Execute(ctx, commands.Request{
+						Channel:  msg.Channel,
+						ChatID:   msg.ChatID,
+						SenderID: msg.SenderID,
+						Text:     msg.Content,
+						Reply:    func(text string) error { reply = text; return nil },
+					})
+					if result.Outcome == commands.OutcomeHandled {
+						if reply != "" {
+							_ = messageBus.PublishOutbound(ctx, bus.OutboundMessage{
+								Channel: msg.Channel,
+								ChatID:  msg.ChatID,
+								Content: reply,
+							})
+						}
+						continue
+					}
+					// OutcomePassthrough: forward to agent.
+				}
+
 				// Re-publish to bus so agent session can pick it up.
 				_ = messageBus.PublishInbound(ctx, msg)
 			}

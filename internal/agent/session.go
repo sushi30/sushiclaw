@@ -21,10 +21,16 @@ import (
 type SessionManager struct {
 	agent *agentsdk.Agent
 	bus   *bus.MessageBus
+	mem   *InMemoryMemory
+	cfg   *config.Config
 }
 
 // BuildAgent creates an agent-sdk-go Agent from config and tools.
 func BuildAgent(cfg *config.Config, tools []interfaces.Tool) (*agentsdk.Agent, error) {
+	return buildAgentWithMemory(cfg, tools, NewInMemoryMemory())
+}
+
+func buildAgentWithMemory(cfg *config.Config, tools []interfaces.Tool, mem *InMemoryMemory) (*agentsdk.Agent, error) {
 	llmClient, err := createLLM(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("create LLM: %w", err)
@@ -53,7 +59,7 @@ func BuildAgent(cfg *config.Config, tools []interfaces.Tool) (*agentsdk.Agent, e
 		agentsdk.WithLLM(llmClient),
 		agentsdk.WithSystemPrompt(systemPrompt),
 		agentsdk.WithTools(tools...),
-		agentsdk.WithMemory(NewInMemoryMemory()),
+		agentsdk.WithMemory(mem),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create agent: %w", err)
@@ -64,7 +70,8 @@ func BuildAgent(cfg *config.Config, tools []interfaces.Tool) (*agentsdk.Agent, e
 
 // NewSessionManager creates a session manager from config.
 func NewSessionManager(cfg *config.Config, messageBus *bus.MessageBus) (*SessionManager, error) {
-	a, err := BuildAgent(cfg, nil)
+	mem := NewInMemoryMemory()
+	a, err := buildAgentWithMemory(cfg, nil, mem)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +79,35 @@ func NewSessionManager(cfg *config.Config, messageBus *bus.MessageBus) (*Session
 	return &SessionManager{
 		agent: a,
 		bus:   messageBus,
+		mem:   mem,
+		cfg:   cfg,
 	}, nil
+}
+
+// ClearHistory resets the agent's conversation memory.
+func (sm *SessionManager) ClearHistory() error {
+	return sm.mem.Clear(context.Background())
+}
+
+// GetModelInfo returns the configured model name and its provider.
+func (sm *SessionManager) GetModelInfo() (name, provider string) {
+	name = sm.cfg.Agents.Defaults.ModelName
+	model := name
+	for i := range sm.cfg.ModelList {
+		if sm.cfg.ModelList[i].ModelName == name {
+			if sm.cfg.ModelList[i].Model != "" {
+				model = sm.cfg.ModelList[i].Model
+			}
+			break
+		}
+	}
+	switch {
+	case strings.HasPrefix(model, "openrouter/"):
+		provider = "openrouter"
+	default:
+		provider = "openai"
+	}
+	return
 }
 
 // RegisterTool registers a tool with the agent.

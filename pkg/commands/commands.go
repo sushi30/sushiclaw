@@ -242,8 +242,8 @@ func normalize(name string) string {
 // These are used by the command filter to allow/block commands.
 func BuiltinDefinitions() []Definition {
 	return []Definition{
-		{Name: "start", Description: "Start the bot"},
-		{Name: "help", Description: "Show this help message"},
+		{Name: "start", Description: "Start the bot", Handler: startHandler},
+		{Name: "help", Description: "Show this help message", Handler: helpHandler},
 		{Name: "clear", Description: "Clear conversation history", Handler: clearHandler},
 		{Name: "debug", Description: "Toggle debug event forwarding"},
 		{Name: "model", Description: "Show or switch model"},
@@ -258,7 +258,31 @@ func BuiltinDefinitions() []Definition {
 	}
 }
 
-func clearHandler(ctx context.Context, req Request, rt *Runtime) error {
+func startHandler(_ context.Context, req Request, _ *Runtime) error {
+	return req.Reply("👋 Sushiclaw is running. Type /help for available commands.")
+}
+
+func helpHandler(_ context.Context, req Request, rt *Runtime) error {
+	var defs []Definition
+	if rt != nil && rt.ListDefinitions != nil {
+		defs = rt.ListDefinitions()
+	}
+	if len(defs) == 0 {
+		return req.Reply("No commands available.")
+	}
+	var sb strings.Builder
+	sb.WriteString("Available commands:\n")
+	for _, d := range defs {
+		sb.WriteString("/" + d.Name)
+		if d.Description != "" {
+			sb.WriteString(" — " + d.Description)
+		}
+		sb.WriteByte('\n')
+	}
+	return req.Reply(strings.TrimRight(sb.String(), "\n"))
+}
+
+func clearHandler(_ context.Context, req Request, rt *Runtime) error {
 	if rt != nil && rt.ClearHistory != nil {
 		if err := rt.ClearHistory(); err != nil {
 			return req.Reply("Failed to clear history: " + err.Error())

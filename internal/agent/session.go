@@ -64,6 +64,7 @@ func buildAgentWithMemory(cfg *config.Config, tools []interfaces.Tool, mem *InMe
 		agentsdk.WithSystemPrompt(systemPrompt),
 		agentsdk.WithTools(tools...),
 		agentsdk.WithMemory(mem),
+		agentsdk.WithRequirePlanApproval(false),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create agent: %w", err)

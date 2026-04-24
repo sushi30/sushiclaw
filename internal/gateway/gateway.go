@@ -74,7 +74,7 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 	var tools []interfaces.Tool
 	if allowedSenders := sushitools.ParseAllowedSenders(); len(allowedSenders) > 0 {
 		if cfg.Tools.IsToolEnabled("exec") {
-			workingDir := cfg.Agents.Defaults.Workspace
+			workingDir := cfg.WorkspacePath()
 			restrict := cfg.Agents.Defaults.RestrictToWorkspace
 			trustedExec, err := sushitools.NewTrustedExecTool(cfg, workingDir, restrict, allowedSenders)
 			if err != nil {

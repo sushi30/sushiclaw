@@ -49,6 +49,9 @@ func buildAgentWithMemory(cfg *config.Config, tools []interfaces.Tool, mem *InMe
 	for i, t := range tools {
 		toolNames[i] = t.Name()
 	}
+	if len(tools) == 0 {
+		systemPrompt += "\n\nIMPORTANT: You have no tools available. You cannot execute commands, run code, or take real-world actions. If asked to do any of these, tell the user you are unable to in the current configuration — do not simulate or pretend to execute anything."
+	}
 	logger.DebugCF("agent", "Building agent", map[string]any{
 		"workspace":     cfg.WorkspacePath(),
 		"prompt_length": len(systemPrompt),

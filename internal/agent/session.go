@@ -23,6 +23,7 @@ type SessionManager struct {
 	bus   *bus.MessageBus
 	mem   *InMemoryMemory
 	cfg   *config.Config
+	tools []interfaces.Tool
 }
 
 // BuildAgent creates an agent-sdk-go Agent from config and tools.
@@ -69,9 +70,9 @@ func buildAgentWithMemory(cfg *config.Config, tools []interfaces.Tool, mem *InMe
 }
 
 // NewSessionManager creates a session manager from config.
-func NewSessionManager(cfg *config.Config, messageBus *bus.MessageBus) (*SessionManager, error) {
+func NewSessionManager(cfg *config.Config, messageBus *bus.MessageBus, tools []interfaces.Tool) (*SessionManager, error) {
 	mem := NewInMemoryMemory()
-	a, err := buildAgentWithMemory(cfg, nil, mem)
+	a, err := buildAgentWithMemory(cfg, tools, mem)
 	if err != nil {
 		return nil, err
 	}
@@ -81,6 +82,7 @@ func NewSessionManager(cfg *config.Config, messageBus *bus.MessageBus) (*Session
 		bus:   messageBus,
 		mem:   mem,
 		cfg:   cfg,
+		tools: tools,
 	}, nil
 }
 
@@ -119,11 +121,13 @@ func (sm *SessionManager) GetModelInfo() (name, provider string) {
 	return
 }
 
-// RegisterTool registers a tool with the agent.
-// Note: agent-sdk-go does not support dynamic tool registration after creation.
-// This is a no-op; tools must be passed during construction.
-func (sm *SessionManager) RegisterTool(t interfaces.Tool) {
-	logger.WarnC("agent", "RegisterTool is a no-op with agent-sdk-go; tools must be passed during construction")
+// ToolNames returns the names of the tools registered with this session manager.
+func (sm *SessionManager) ToolNames() []string {
+	names := make([]string, len(sm.tools))
+	for i, t := range sm.tools {
+		names[i] = t.Name()
+	}
+	return names
 }
 
 // Chat runs a single turn against the agent and returns the response.

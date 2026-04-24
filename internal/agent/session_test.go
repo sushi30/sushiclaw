@@ -1,15 +1,25 @@
 package agent_test
 
 import (
+	"context"
 	"os"
 	"testing"
 
+	"github.com/Ingenimax/agent-sdk-go/pkg/interfaces"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/sushi30/sushiclaw/internal/agent"
 	"github.com/sushi30/sushiclaw/pkg/config"
 )
+
+type mockTool struct{ name string }
+
+func (m *mockTool) Name() string                                          { return m.name }
+func (m *mockTool) Description() string                                   { return "" }
+func (m *mockTool) Run(_ context.Context, _ string) (string, error)       { return "", nil }
+func (m *mockTool) Parameters() map[string]interfaces.ParameterSpec       { return nil }
+func (m *mockTool) Execute(_ context.Context, _ string) (string, error)   { return "", nil }
 
 func TestBuildAgent_UnresolvedEnvKey(t *testing.T) {
 	_ = os.Unsetenv("MISSING_API_KEY")
@@ -136,4 +146,24 @@ func TestBuildAgent_NoAPIKey(t *testing.T) {
 	_, err := agent.BuildAgent(cfg, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no API key")
+}
+
+func TestNewSessionManager_ToolsRegistered(t *testing.T) {
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{ModelName: "test-model"},
+		},
+		ModelList: []config.ModelConfig{
+			{
+				ModelName: "test-model",
+				Model:     "gpt-4o",
+				APIKey:    config.NewSecureString("test-key"),
+			},
+		},
+	}
+
+	tool := &mockTool{name: "test-tool"}
+	sm, err := agent.NewSessionManager(cfg, nil, []interfaces.Tool{tool})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"test-tool"}, sm.ToolNames())
 }

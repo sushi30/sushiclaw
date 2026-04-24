@@ -100,7 +100,7 @@ func TestDownloadFile_Non200Status(t *testing.T) {
 func TestDownloadFile_Success(t *testing.T) {
 	// Start a local test server.
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("hello world"))
+		_, _ = w.Write([]byte("hello world"))
 	}))
 	defer ts.Close()
 

@@ -37,7 +37,7 @@ jobs:
 
       - uses: golangci/golangci-lint-action@v4
         with:
-          version: v2.10.1
+          version: latest:v2.11.4
 
   test:
     name: Tests

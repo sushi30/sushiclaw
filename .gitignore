@@ -30,3 +30,7 @@ go.work.sum
 
 coverage.html
 coverage.out
+
+# Air live-reload
+/tmp/
+build-errors.log

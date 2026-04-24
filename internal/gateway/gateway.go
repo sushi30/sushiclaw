@@ -15,6 +15,7 @@ import (
 	"github.com/sushi30/sushiclaw/pkg/bus"
 	"github.com/sushi30/sushiclaw/pkg/channels"
 	"github.com/sushi30/sushiclaw/pkg/channels/email"
+	"github.com/sushi30/sushiclaw/pkg/commands"
 	"github.com/sushi30/sushiclaw/pkg/config"
 	"github.com/sushi30/sushiclaw/pkg/logger"
 	"github.com/sushi30/sushiclaw/pkg/media"
@@ -63,6 +64,11 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 	// Single bus architecture: all channels and the agent share one MessageBus.
 	messageBus := bus.NewMessageBus()
 	cmdFilter := commandfilter.NewCommandFilter()
+
+	reg := commands.NewRegistry(commands.BuiltinDefinitions())
+	rt := &commands.Runtime{
+		ListDefinitions: reg.Definitions,
+	}
 
 	sessionMgr, err := agent.NewSessionManager(cfg, messageBus)
 	if err != nil {
@@ -130,10 +136,14 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 	defer cancel()
 
 	if sessionMgr != nil {
-		go sessionMgr.Run(ctx)
+		rt.ClearHistory = sessionMgr.ClearHistory
+		rt.GetModelInfo = sessionMgr.GetModelInfo
+		rt.ListModels = sessionMgr.ListModels
 	}
+	executor := commands.NewExecutor(reg, rt)
 
-	// Inbound processing: filter commands, then publish to bus for agent.
+	// Inbound processing: filter commands, execute handled ones locally,
+	// forward the rest to the agent session.
 	go func() {
 		for {
 			select {
@@ -144,6 +154,12 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 					return
 				}
 				dec := cmdFilter.Filter(msg)
+				logger.DebugCF("commandfilter", "Filtered message",
+					map[string]any{
+						"text":    msg.Content,
+						"result":  dec.Result,
+						"command": dec.Command,
+					})
 				if dec.Result == commandfilter.Block {
 					logger.InfoCF("commandfilter", "Blocked unrecognized slash command",
 						map[string]any{
@@ -158,8 +174,40 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 					})
 					continue
 				}
-				// Re-publish to bus so agent session can pick it up.
-				_ = messageBus.PublishInbound(ctx, msg)
+
+				if commands.HasCommandPrefix(msg.Content) {
+					var reply string
+					result := executor.Execute(ctx, commands.Request{
+						Channel:  msg.Channel,
+						ChatID:   msg.ChatID,
+						SenderID: msg.SenderID,
+						Text:     msg.Content,
+						Reply:    func(text string) error { reply = text; return nil },
+					})
+					logger.DebugCF("executor", "Command executed",
+						map[string]any{
+							"text":    msg.Content,
+							"command": result.Command,
+							"outcome": result.Outcome,
+							"handled": result.Outcome == commands.OutcomeHandled,
+						})
+					if result.Outcome == commands.OutcomeHandled {
+						if reply != "" {
+							_ = messageBus.PublishOutbound(ctx, bus.OutboundMessage{
+								Channel: msg.Channel,
+								ChatID:  msg.ChatID,
+								Content: reply,
+							})
+						}
+						continue
+					}
+					// OutcomePassthrough: forward to agent.
+				}
+
+				// Dispatch to agent session directly (avoids bus read race).
+				if sessionMgr != nil {
+					go sessionMgr.Dispatch(ctx, msg)
+				}
 			}
 		}
 	}()

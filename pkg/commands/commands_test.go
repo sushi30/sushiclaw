@@ -45,7 +45,7 @@ func TestCommandName(t *testing.T) {
 
 func TestExecuteHelp(t *testing.T) {
 	reg := commands.NewRegistry(commands.BuiltinDefinitions())
-	rt := &commands.Runtime{}
+	rt := &commands.Runtime{ListDefinitions: reg.Definitions}
 	exec := commands.NewExecutor(reg, rt)
 
 	var replied string
@@ -54,10 +54,63 @@ func TestExecuteHelp(t *testing.T) {
 		Reply: func(s string) error { replied = s; return nil },
 	}
 
-	// /help has no handler in builtins (passthrough to LLM)
 	result := exec.Execute(context.Background(), req)
+	assert.Equal(t, commands.OutcomeHandled, result.Outcome)
+	assert.Contains(t, replied, "/help")
+	assert.Contains(t, replied, "/clear")
+}
+
+func TestExecuteHelpNoRuntime(t *testing.T) {
+	reg := commands.NewRegistry(commands.BuiltinDefinitions())
+	exec := commands.NewExecutor(reg, &commands.Runtime{})
+
+	var replied string
+	result := exec.Execute(context.Background(), commands.Request{
+		Text:  "/help",
+		Reply: func(s string) error { replied = s; return nil },
+	})
+	assert.Equal(t, commands.OutcomeHandled, result.Outcome)
+	assert.Contains(t, replied, "No commands available.")
+}
+
+func TestExecuteStart(t *testing.T) {
+	reg := commands.NewRegistry(commands.BuiltinDefinitions())
+	exec := commands.NewExecutor(reg, &commands.Runtime{})
+
+	var replied string
+	result := exec.Execute(context.Background(), commands.Request{
+		Text:  "/start",
+		Reply: func(s string) error { replied = s; return nil },
+	})
+	assert.Equal(t, commands.OutcomeHandled, result.Outcome)
+	assert.NotEmpty(t, replied)
+}
+
+func TestExecuteClearCallsCallback(t *testing.T) {
+	cleared := false
+	reg := commands.NewRegistry(commands.BuiltinDefinitions())
+	rt := &commands.Runtime{
+		ClearHistory: func() error { cleared = true; return nil },
+	}
+	exec := commands.NewExecutor(reg, rt)
+
+	var replied string
+	result := exec.Execute(context.Background(), commands.Request{
+		Text:  "/clear",
+		Reply: func(s string) error { replied = s; return nil },
+	})
+	assert.Equal(t, commands.OutcomeHandled, result.Outcome)
+	assert.True(t, cleared)
+	assert.Contains(t, replied, "cleared")
+}
+
+func TestExecutePassthroughNoHandler(t *testing.T) {
+	reg := commands.NewRegistry(commands.BuiltinDefinitions())
+	exec := commands.NewExecutor(reg, &commands.Runtime{})
+
+	// /use has no handler — should pass through to agent
+	result := exec.Execute(context.Background(), commands.Request{Text: "/use"})
 	assert.Equal(t, commands.OutcomePassthrough, result.Outcome)
-	_ = replied
 }
 
 func TestExecuteUnrecognizedReturnsPassthrough(t *testing.T) {

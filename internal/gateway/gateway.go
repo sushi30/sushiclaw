@@ -138,12 +138,9 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 	if sessionMgr != nil {
 		rt.ClearHistory = sessionMgr.ClearHistory
 		rt.GetModelInfo = sessionMgr.GetModelInfo
+		rt.ListModels = sessionMgr.ListModels
 	}
 	executor := commands.NewExecutor(reg, rt)
-
-	if sessionMgr != nil {
-		go sessionMgr.Run(ctx)
-	}
 
 	// Inbound processing: filter commands, execute handled ones locally,
 	// forward the rest to the agent session.
@@ -157,6 +154,12 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 					return
 				}
 				dec := cmdFilter.Filter(msg)
+				logger.DebugCF("commandfilter", "Filtered message",
+					map[string]any{
+						"text":    msg.Content,
+						"result":  dec.Result,
+						"command": dec.Command,
+					})
 				if dec.Result == commandfilter.Block {
 					logger.InfoCF("commandfilter", "Blocked unrecognized slash command",
 						map[string]any{
@@ -181,6 +184,13 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 						Text:     msg.Content,
 						Reply:    func(text string) error { reply = text; return nil },
 					})
+					logger.DebugCF("executor", "Command executed",
+						map[string]any{
+							"text":    msg.Content,
+							"command": result.Command,
+							"outcome": result.Outcome,
+							"handled": result.Outcome == commands.OutcomeHandled,
+						})
 					if result.Outcome == commands.OutcomeHandled {
 						if reply != "" {
 							_ = messageBus.PublishOutbound(ctx, bus.OutboundMessage{
@@ -194,8 +204,10 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 					// OutcomePassthrough: forward to agent.
 				}
 
-				// Re-publish to bus so agent session can pick it up.
-				_ = messageBus.PublishInbound(ctx, msg)
+				// Dispatch to agent session directly (avoids bus read race).
+				if sessionMgr != nil {
+					go sessionMgr.Dispatch(ctx, msg)
+				}
 			}
 		}
 	}()

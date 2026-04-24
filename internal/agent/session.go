@@ -89,6 +89,15 @@ func (sm *SessionManager) ClearHistory() error {
 	return sm.mem.Clear(context.Background())
 }
 
+// ListModels returns all configured model names.
+func (sm *SessionManager) ListModels() []string {
+	names := make([]string, 0, len(sm.cfg.ModelList))
+	for _, m := range sm.cfg.ModelList {
+		names = append(names, m.ModelName)
+	}
+	return names
+}
+
 // GetModelInfo returns the configured model name and its provider.
 func (sm *SessionManager) GetModelInfo() (name, provider string) {
 	name = sm.cfg.Agents.Defaults.ModelName
@@ -124,19 +133,10 @@ func (sm *SessionManager) Chat(ctx context.Context, input string) (string, error
 	return sm.agent.Run(actx, input)
 }
 
-// Run listens on the inbound bus channel and processes messages.
-func (sm *SessionManager) Run(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case msg, ok := <-sm.bus.InboundChan():
-			if !ok {
-				return
-			}
-			sm.handleInbound(ctx, msg)
-		}
-	}
+// Dispatch processes a single inbound message through the agent.
+// Called by the gateway after command filtering and local execution.
+func (sm *SessionManager) Dispatch(ctx context.Context, msg bus.InboundMessage) {
+	sm.handleInbound(ctx, msg)
 }
 
 func (sm *SessionManager) handleInbound(ctx context.Context, msg bus.InboundMessage) {

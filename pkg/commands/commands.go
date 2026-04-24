@@ -56,6 +56,7 @@ type Request struct {
 type Runtime struct {
 	GetModelInfo    func() (name, provider string)
 	ListDefinitions func() []Definition
+	ListModels      func() []string
 	ClearHistory    func() error
 }
 
@@ -248,7 +249,9 @@ func BuiltinDefinitions() []Definition {
 		{Name: "debug", Description: "Toggle debug event forwarding"},
 		{Name: "model", Description: "Show or switch model"},
 		{Name: "show", Description: "Show current configuration"},
-		{Name: "list", Description: "List available options"},
+		{Name: "list", Description: "List available options", SubCommands: []SubCommand{
+			{Name: "models", Description: "List configured models", Handler: listModelsHandler},
+		}},
 		{Name: "use", Description: "Use a specific configuration"},
 		{Name: "btw", Description: "Add a note to conversation context"},
 		{Name: "switch", Description: "Switch model or channel"},
@@ -267,17 +270,39 @@ func helpHandler(_ context.Context, req Request, rt *Runtime) error {
 	if rt != nil && rt.ListDefinitions != nil {
 		defs = rt.ListDefinitions()
 	}
-	if len(defs) == 0 {
+	var available []Definition
+	for _, d := range defs {
+		if d.Handler != nil || len(d.SubCommands) > 0 {
+			available = append(available, d)
+		}
+	}
+	if len(available) == 0 {
 		return req.Reply("No commands available.")
 	}
 	var sb strings.Builder
 	sb.WriteString("Available commands:\n")
-	for _, d := range defs {
+	for _, d := range available {
 		sb.WriteString("/" + d.Name)
 		if d.Description != "" {
 			sb.WriteString(" — " + d.Description)
 		}
 		sb.WriteByte('\n')
+	}
+	return req.Reply(strings.TrimRight(sb.String(), "\n"))
+}
+
+func listModelsHandler(_ context.Context, req Request, rt *Runtime) error {
+	if rt == nil || rt.ListModels == nil {
+		return req.Reply("Model list unavailable.")
+	}
+	models := rt.ListModels()
+	if len(models) == 0 {
+		return req.Reply("No models configured.")
+	}
+	var sb strings.Builder
+	sb.WriteString("Configured models:\n")
+	for _, m := range models {
+		sb.WriteString("• " + m + "\n")
 	}
 	return req.Reply(strings.TrimRight(sb.String(), "\n"))
 }

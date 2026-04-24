@@ -15,11 +15,11 @@ import (
 
 type mockTool struct{ name string }
 
-func (m *mockTool) Name() string                                          { return m.name }
-func (m *mockTool) Description() string                                   { return "" }
-func (m *mockTool) Run(_ context.Context, _ string) (string, error)       { return "", nil }
-func (m *mockTool) Parameters() map[string]interfaces.ParameterSpec       { return nil }
-func (m *mockTool) Execute(_ context.Context, _ string) (string, error)   { return "", nil }
+func (m *mockTool) Name() string                                        { return m.name }
+func (m *mockTool) Description() string                                 { return "" }
+func (m *mockTool) Run(_ context.Context, _ string) (string, error)     { return "", nil }
+func (m *mockTool) Parameters() map[string]interfaces.ParameterSpec     { return nil }
+func (m *mockTool) Execute(_ context.Context, _ string) (string, error) { return "", nil }
 
 func TestBuildAgent_UnresolvedEnvKey(t *testing.T) {
 	_ = os.Unsetenv("MISSING_API_KEY")
@@ -166,4 +166,36 @@ func TestNewSessionManager_ToolsRegistered(t *testing.T) {
 	sm, err := agent.NewSessionManager(cfg, nil, []interfaces.Tool{tool})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"test-tool"}, sm.ToolNames())
+}
+
+func TestBuildAgent_WithMCPConfig(t *testing.T) {
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{ModelName: "test-model"},
+		},
+		ModelList: []config.ModelConfig{
+			{
+				ModelName: "test-model",
+				Model:     "gpt-4o",
+				APIKey:    config.NewSecureString("test-key"),
+			},
+		},
+		MCP: config.MCPConfig{
+			MCPServers: map[string]config.MCPServerConfig{
+				"filesystem": {
+					Command: "npx",
+					Args:    []string{"-y", "@modelcontextprotocol/server-filesystem", "/tmp"},
+				},
+				"remote": {
+					URL:   "http://localhost:3000/mcp",
+					Token: config.NewSecureString("secret-token"),
+				},
+			},
+		},
+	}
+
+	// BuildAgent should succeed with MCP config; agent-sdk-go uses lazy
+	// initialization so no actual server connection is attempted.
+	_, err := agent.BuildAgent(cfg, nil)
+	require.NoError(t, err, "expected BuildAgent to succeed with MCP config")
 }

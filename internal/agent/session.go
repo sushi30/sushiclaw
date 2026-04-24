@@ -58,19 +58,49 @@ func buildAgentWithMemory(cfg *config.Config, tools []interfaces.Tool, mem *InMe
 		"tools":         toolNames,
 	})
 
-	a, err := agentsdk.NewAgent(
+	opts := []agentsdk.Option{
 		agentsdk.WithName("sushiclaw"),
 		agentsdk.WithLLM(llmClient),
 		agentsdk.WithSystemPrompt(systemPrompt),
 		agentsdk.WithTools(tools...),
 		agentsdk.WithMemory(mem),
 		agentsdk.WithRequirePlanApproval(false),
-	)
+	}
+	if mcpCfg := toAgentSDKMCPConfig(cfg.MCP); mcpCfg != nil {
+		opts = append(opts, agentsdk.WithMCPConfig(mcpCfg))
+	}
+
+	a, err := agentsdk.NewAgent(opts...)
 	if err != nil {
 		return nil, fmt.Errorf("create agent: %w", err)
 	}
 
 	return a, nil
+}
+
+// toAgentSDKMCPConfig converts sushiclaw MCPConfig to agent-sdk-go MCPConfiguration.
+func toAgentSDKMCPConfig(cfg config.MCPConfig) *agentsdk.MCPConfiguration {
+	if len(cfg.MCPServers) == 0 {
+		return nil
+	}
+	servers := make(map[string]agentsdk.MCPServerConfig, len(cfg.MCPServers))
+	for name, s := range cfg.MCPServers {
+		var token string
+		if s.Token != nil {
+			token = s.Token.String()
+		}
+		servers[name] = agentsdk.MCPServerConfig{
+			Command:      s.Command,
+			Args:         s.Args,
+			Env:          s.Env,
+			URL:          s.URL,
+			Token:        token,
+			AllowedTools: s.AllowedTools,
+		}
+	}
+	return &agentsdk.MCPConfiguration{
+		MCPServers: servers,
+	}
 }
 
 // NewSessionManager creates a session manager from config.

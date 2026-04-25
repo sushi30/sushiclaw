@@ -132,6 +132,7 @@ func TestLoadConfig_ValidFile(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 2, cfg.Version)
 	assert.Equal(t, "test-model", cfg.Agents.Defaults.ModelName)
+	assert.Equal(t, 5, cfg.Agents.Defaults.MaxToolIterations)
 	assert.Equal(t, 8080, cfg.Gateway.Port)
 	assert.NotNil(t, cfg.Channels["telegram"])
 	assert.Equal(t, "telegram", cfg.Channels["telegram"].Name())

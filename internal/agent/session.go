@@ -32,6 +32,11 @@ func BuildAgent(cfg *config.Config, tools []interfaces.Tool) (*agentsdk.Agent, e
 }
 
 func buildAgentWithMemory(cfg *config.Config, tools []interfaces.Tool, mem *InMemoryMemory) (*agentsdk.Agent, error) {
+	maxToolIterations := cfg.Agents.Defaults.MaxToolIterations
+	if maxToolIterations < 0 {
+		return nil, fmt.Errorf("invalid max_tool_iterations %d: must be >= 0", maxToolIterations)
+	}
+
 	llmClient, err := createLLM(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("create LLM: %w", err)
@@ -65,6 +70,9 @@ func buildAgentWithMemory(cfg *config.Config, tools []interfaces.Tool, mem *InMe
 		agentsdk.WithTools(tools...),
 		agentsdk.WithMemory(mem),
 		agentsdk.WithRequirePlanApproval(false),
+	}
+	if maxToolIterations > 0 {
+		opts = append(opts, agentsdk.WithMaxIterations(maxToolIterations))
 	}
 	if mcpCfg := toAgentSDKMCPConfig(cfg.MCP); mcpCfg != nil {
 		opts = append(opts, agentsdk.WithMCPConfig(mcpCfg))

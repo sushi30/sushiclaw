@@ -67,6 +67,7 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 	cmdFilter := commandfilter.NewCommandFilter()
 
 	reg := commands.NewRegistry(commands.BuiltinDefinitions())
+	dm := NewDebugManager(messageBus)
 	rt := &commands.Runtime{
 		ListDefinitions: reg.Definitions,
 	}
@@ -137,12 +138,24 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	rt.ToggleDebug = dm.Toggle
 	if sessionMgr != nil {
 		rt.ClearHistory = sessionMgr.ClearHistory
 		rt.GetModelInfo = sessionMgr.GetModelInfo
 		rt.ListModels = sessionMgr.ListModels
 	}
 	executor := commands.NewExecutor(reg, rt)
+	router := &inboundRouter{
+		messageBus:     messageBus,
+		cmdFilter:      cmdFilter,
+		executor:       executor,
+		autoOnboarding: newOnboardingState(cfg.Onboarding),
+	}
+	if sessionMgr != nil {
+		router.sessionDispatcher = func(ctx context.Context, msg bus.InboundMessage) {
+			go sessionMgr.Dispatch(ctx, msg)
+		}
+	}
 
 	// Inbound processing: filter commands, execute handled ones locally,
 	// forward the rest to the agent session.
@@ -155,61 +168,7 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 				if !ok {
 					return
 				}
-				dec := cmdFilter.Filter(msg)
-				logger.DebugCF("commandfilter", "Filtered message",
-					map[string]any{
-						"text":    msg.Content,
-						"result":  dec.Result,
-						"command": dec.Command,
-					})
-				if dec.Result == commandfilter.Block {
-					logger.InfoCF("commandfilter", "Blocked unrecognized slash command",
-						map[string]any{
-							"channel": msg.Channel,
-							"chat_id": msg.ChatID,
-							"command": dec.Command,
-						})
-					_ = messageBus.PublishOutbound(ctx, bus.OutboundMessage{
-						Channel: msg.Channel,
-						ChatID:  msg.ChatID,
-						Content: dec.ErrMsg,
-					})
-					continue
-				}
-
-				if commands.HasCommandPrefix(msg.Content) {
-					var reply string
-					result := executor.Execute(ctx, commands.Request{
-						Channel:  msg.Channel,
-						ChatID:   msg.ChatID,
-						SenderID: msg.SenderID,
-						Text:     msg.Content,
-						Reply:    func(text string) error { reply = text; return nil },
-					})
-					logger.DebugCF("executor", "Command executed",
-						map[string]any{
-							"text":    msg.Content,
-							"command": result.Command,
-							"outcome": result.Outcome,
-							"handled": result.Outcome == commands.OutcomeHandled,
-						})
-					if result.Outcome == commands.OutcomeHandled {
-						if reply != "" {
-							_ = messageBus.PublishOutbound(ctx, bus.OutboundMessage{
-								Channel: msg.Channel,
-								ChatID:  msg.ChatID,
-								Content: reply,
-							})
-						}
-						continue
-					}
-					// OutcomePassthrough: forward to agent.
-				}
-
-				// Dispatch to agent session directly (avoids bus read race).
-				if sessionMgr != nil {
-					go sessionMgr.Dispatch(ctx, msg)
-				}
+				router.handleMessage(ctx, msg)
 			}
 		}
 	}()
@@ -246,4 +205,3 @@ func GetConfigPath() string {
 	}
 	return filepath.Join(GetHome(), "config.json")
 }
-

@@ -64,6 +64,11 @@
     "port": 18800,
     "log_level": "info"
   },
+  "onboarding": {
+    "auto": {
+      "enabled": false
+    }
+  },
   "tools": {
     "web": {
       "enabled": true,

@@ -58,6 +58,7 @@ type Runtime struct {
 	ListDefinitions func() []Definition
 	ListModels      func() []string
 	ClearHistory    func() error
+	ToggleDebug     func(ctx context.Context, channel, chatID string) string
 }
 
 // Registry stores command definitions indexed by name and alias.
@@ -239,15 +240,33 @@ func normalize(name string) string {
 	return strings.ToLower(strings.TrimSpace(name))
 }
 
+// OnboardingMessage returns the shared onboarding copy used by /welcome and
+// first-run auto-onboarding.
+func OnboardingMessage() string {
+	return strings.Join([]string{
+		"Welcome to sushiclaw.",
+		"I can help with:",
+		"- answering questions and explaining code",
+		"- inspecting files and debugging issues",
+		"- using configured tools and commands",
+		"Try one of these:",
+		"- /help",
+		"- /model",
+		"- Ask: summarize this repo",
+		"- Ask: debug this error",
+	}, "\n")
+}
+
 // BuiltinDefinitions returns sushiclaw's recognized slash commands.
 // These are used by the command filter to allow/block commands.
 func BuiltinDefinitions() []Definition {
 	return []Definition{
 		{Name: "start", Description: "Start the bot", Handler: startHandler},
 		{Name: "help", Description: "Show this help message", Handler: helpHandler},
+		{Name: "welcome", Description: "Show onboarding and quick actions", Handler: welcomeHandler},
 		{Name: "clear", Description: "Clear conversation history", Handler: clearHandler},
-		{Name: "debug", Description: "Toggle debug event forwarding"},
-		{Name: "model", Description: "Show or switch model"},
+		{Name: "debug", Description: "Toggle debug event forwarding", Handler: debugHandler},
+		{Name: "model", Description: "Show or switch model", Handler: modelHandler},
 		{Name: "show", Description: "Show current configuration"},
 		{Name: "list", Description: "List available options", SubCommands: []SubCommand{
 			{Name: "models", Description: "List configured models", Handler: listModelsHandler},
@@ -291,6 +310,10 @@ func helpHandler(_ context.Context, req Request, rt *Runtime) error {
 	return req.Reply(strings.TrimRight(sb.String(), "\n"))
 }
 
+func welcomeHandler(_ context.Context, req Request, _ *Runtime) error {
+	return req.Reply(OnboardingMessage())
+}
+
 func listModelsHandler(_ context.Context, req Request, rt *Runtime) error {
 	if rt == nil || rt.ListModels == nil {
 		return req.Reply("Model list unavailable.")
@@ -314,4 +337,23 @@ func clearHandler(_ context.Context, req Request, rt *Runtime) error {
 		}
 	}
 	return req.Reply("History cleared.")
+}
+
+func modelHandler(_ context.Context, req Request, rt *Runtime) error {
+	if rt == nil || rt.GetModelInfo == nil {
+		return req.Reply("Model info unavailable.")
+	}
+	name, provider := rt.GetModelInfo()
+	if name == "" {
+		return req.Reply("No model configured.")
+	}
+	return req.Reply(fmt.Sprintf("Current model: %s (%s)", name, provider))
+}
+
+func debugHandler(ctx context.Context, req Request, rt *Runtime) error {
+	if rt == nil || rt.ToggleDebug == nil {
+		return req.Reply("Debug toggle unavailable.")
+	}
+	reply := rt.ToggleDebug(ctx, req.Channel, req.ChatID)
+	return req.Reply(reply)
 }

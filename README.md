@@ -92,6 +92,7 @@ Copy `config.example.json` to `~/.picoclaw/config.json`. Key sections:
   "model_list": [{ "model_name": "claude-sonnet", "api_key": "env://ANTHROPIC_API_KEY" }],
   "channels": { ... },
   "email_channel": { ... },
+  "onboarding": { "auto": { "enabled": true } },
   "tools": { ... }
 }
 ```
@@ -114,9 +115,9 @@ Resolved at load time by `pkg/config.SecureString` during JSON unmarshal.
 
 ---
 
-### MCP server support
+### Onboarding
 
-Connect the agent to [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) servers for external tools (filesystem, GitHub, databases, etc.).
+Enable `onboarding.auto.enabled` to send a welcome message on the first direct message from Telegram or WhatsApp. Use `/welcome` at any time to see it again.
 
 ```json
 {

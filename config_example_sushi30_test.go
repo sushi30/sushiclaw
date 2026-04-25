@@ -35,6 +35,9 @@ func TestExampleConfigLoadsAsV2(t *testing.T) {
 	if cfg.Version != 2 {
 		t.Errorf("Version = %d, want 2", cfg.Version)
 	}
+	if cfg.Onboarding.Auto.Enabled {
+		t.Error("onboarding.auto.enabled should default to false in example config")
+	}
 
 	if len(cfg.ModelList) == 0 {
 		t.Error("model_list is empty")

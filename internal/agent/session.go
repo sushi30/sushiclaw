@@ -67,6 +67,13 @@ func buildAgentWithMemory(cfg *config.Config, tools []interfaces.Tool, mem *InMe
 		"prompt_length": len(systemPrompt),
 		"tools":         toolNames,
 	})
+	for _, t := range tools {
+		logger.DebugCF("agent", "Registering tool", map[string]any{
+			"name":        t.Name(),
+			"description": t.Description(),
+			"parameters":  t.Parameters(),
+		})
+	}
 
 	opts := []agentsdk.Option{
 		agentsdk.WithName("sushiclaw"),

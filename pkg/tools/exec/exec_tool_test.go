@@ -75,6 +75,32 @@ func TestExecTool_Execute_RawCommand(t *testing.T) {
 	}
 }
 
+func TestExecTool_Execute_JSONCommandPreservesQuoting(t *testing.T) {
+	tool := NewExecTool("", false, true)
+	ctx := WithChatID(context.Background(), "cli")
+
+	out, err := tool.Execute(ctx, `{"command":"printf '%s\n' \"hello world\""}`)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if out != "hello world\n" {
+		t.Errorf("output = %q, want %q", out, "hello world\n")
+	}
+}
+
+func TestExecTool_Execute_JSONStringCommand(t *testing.T) {
+	tool := NewExecTool("", false, true)
+	ctx := WithChatID(context.Background(), "cli")
+
+	out, err := tool.Execute(ctx, `"echo string-command"`)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out, "string-command") {
+		t.Errorf("output = %q, want to contain 'string-command'", out)
+	}
+}
+
 func TestExecTool_Execute_Empty(t *testing.T) {
 	tool := NewExecTool("", false, true)
 	_, err := tool.Execute(context.Background(), "")

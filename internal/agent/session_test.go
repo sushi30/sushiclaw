@@ -3,8 +3,10 @@ package agent_test
 import (
 	"context"
 	"os"
+	"reflect"
 	"testing"
 
+	agentsdk "github.com/Ingenimax/agent-sdk-go/pkg/agent"
 	"github.com/Ingenimax/agent-sdk-go/pkg/interfaces"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -20,6 +22,14 @@ func (m *mockTool) Description() string                                 { return
 func (m *mockTool) Run(_ context.Context, _ string) (string, error)     { return "", nil }
 func (m *mockTool) Parameters() map[string]interfaces.ParameterSpec     { return nil }
 func (m *mockTool) Execute(_ context.Context, _ string) (string, error) { return "", nil }
+
+func agentMaxIterations(t *testing.T, a *agentsdk.Agent) int {
+	t.Helper()
+
+	v := reflect.ValueOf(a).Elem().FieldByName("maxIterations")
+	require.True(t, v.IsValid(), "expected maxIterations field to exist")
+	return int(v.Int())
+}
 
 func TestBuildAgent_UnresolvedEnvKey(t *testing.T) {
 	_ = os.Unsetenv("MISSING_API_KEY")
@@ -131,6 +141,73 @@ func TestBuildAgent_DefaultOpenAI(t *testing.T) {
 	// BuildAgent should succeed for default (non-OpenRouter) models.
 	_, err := agent.BuildAgent(cfg, nil)
 	require.NoError(t, err, "expected BuildAgent to succeed with default OpenAI provider")
+}
+
+func TestBuildAgent_MaxToolIterationsApplied(t *testing.T) {
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				ModelName:         "test-model",
+				MaxToolIterations: 7,
+			},
+		},
+		ModelList: []config.ModelConfig{
+			{
+				ModelName: "test-model",
+				Model:     "gpt-4o",
+				APIKey:    config.NewSecureString("test-key"),
+			},
+		},
+	}
+
+	a, err := agent.BuildAgent(cfg, nil)
+	require.NoError(t, err)
+	assert.Equal(t, 7, agentMaxIterations(t, a))
+}
+
+func TestBuildAgent_MaxToolIterationsZeroUsesDefault(t *testing.T) {
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				ModelName:         "test-model",
+				MaxToolIterations: 0,
+			},
+		},
+		ModelList: []config.ModelConfig{
+			{
+				ModelName: "test-model",
+				Model:     "gpt-4o",
+				APIKey:    config.NewSecureString("test-key"),
+			},
+		},
+	}
+
+	a, err := agent.BuildAgent(cfg, nil)
+	require.NoError(t, err)
+	assert.Equal(t, 2, agentMaxIterations(t, a))
+}
+
+func TestBuildAgent_MaxToolIterationsNegative(t *testing.T) {
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				ModelName:         "test-model",
+				MaxToolIterations: -1,
+			},
+		},
+		ModelList: []config.ModelConfig{
+			{
+				ModelName: "test-model",
+				Model:     "gpt-4o",
+				APIKey:    config.NewSecureString("test-key"),
+			},
+		},
+	}
+
+	_, err := agent.BuildAgent(cfg, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "max_tool_iterations")
+	assert.Contains(t, err.Error(), "must be >= 0")
 }
 
 func TestBuildAgent_NoAPIKey(t *testing.T) {

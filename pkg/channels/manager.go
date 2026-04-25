@@ -17,10 +17,10 @@ var ErrSendFailed = errors.New("channel send failed")
 
 // Manager owns the channel set and dispatches outbound messages from the bus.
 type Manager struct {
-	mu          sync.RWMutex
-	channels    map[string]Channel
-	bus         *bus.MessageBus
-	mediaStore  media.MediaStore
+	mu         sync.RWMutex
+	channels   map[string]Channel
+	bus        *bus.MessageBus
+	mediaStore media.MediaStore
 
 	placeholders  sync.Map // "channel:chatID" → placeholderID (string)
 	typingStops   sync.Map // "channel:chatID" → func()
@@ -34,9 +34,9 @@ type Manager struct {
 // NewManager creates a Manager, creates channels from config factories, and sets up media/placeholders.
 func NewManager(cfg *config.Config, messageBus *bus.MessageBus, ms media.MediaStore) (*Manager, error) {
 	m := &Manager{
-		channels:    make(map[string]Channel),
-		bus:         messageBus,
-		mediaStore:  ms,
+		channels:     make(map[string]Channel),
+		bus:          messageBus,
+		mediaStore:   ms,
 		dispatchDone: make(chan struct{}),
 	}
 

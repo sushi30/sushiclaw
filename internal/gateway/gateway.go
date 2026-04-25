@@ -246,4 +246,3 @@ func GetConfigPath() string {
 	}
 	return filepath.Join(GetHome(), "config.json")
 }
-

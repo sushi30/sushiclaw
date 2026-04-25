@@ -35,11 +35,11 @@ type InboundContext struct {
 
 type InboundMessage struct {
 	Context    InboundContext `json:"context"`
-	Sender     SenderInfo    `json:"sender"`
-	Content    string        `json:"content"`
-	Media      []string      `json:"media,omitempty"`
-	MediaScope string        `json:"media_scope,omitempty"`
-	SessionKey string        `json:"session_key"`
+	Sender     SenderInfo     `json:"sender"`
+	Content    string         `json:"content"`
+	Media      []string       `json:"media,omitempty"`
+	MediaScope string         `json:"media_scope,omitempty"`
+	SessionKey string         `json:"session_key"`
 
 	Channel   string `json:"channel"`
 	SenderID  string `json:"sender_id"`

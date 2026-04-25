@@ -17,14 +17,15 @@ const (
 
 // Config is the top-level sushiclaw configuration.
 type Config struct {
-	Version      int            `json:"version,omitempty"`
-	Agents       AgentsConfig   `json:"agents"`
-	ModelList    []ModelConfig  `json:"model_list"`
-	Channels     ChannelsConfig `json:"channels"`
-	EmailChannel *EmailChanCfg  `json:"email_channel,omitempty"`
-	Gateway      GatewayConfig  `json:"gateway"`
-	Tools        ToolsConfig    `json:"tools"`
-	MCP          MCPConfig      `json:"mcp,omitempty"`
+	Version      int              `json:"version,omitempty"`
+	Agents       AgentsConfig     `json:"agents"`
+	ModelList    []ModelConfig    `json:"model_list"`
+	Channels     ChannelsConfig   `json:"channels"`
+	EmailChannel *EmailChanCfg    `json:"email_channel,omitempty"`
+	Gateway      GatewayConfig    `json:"gateway"`
+	Onboarding   OnboardingConfig `json:"onboarding,omitempty"`
+	Tools        ToolsConfig      `json:"tools"`
+	MCP          MCPConfig        `json:"mcp,omitempty"`
 }
 
 // MCPConfig holds MCP server configuration.
@@ -80,6 +81,14 @@ type GatewayConfig struct {
 	Host     string `json:"host"`
 	Port     int    `json:"port"`
 	LogLevel string `json:"log_level"`
+}
+
+type OnboardingConfig struct {
+	Auto AutoOnboardingConfig `json:"auto,omitempty"`
+}
+
+type AutoOnboardingConfig struct {
+	Enabled bool `json:"enabled,omitempty"`
 }
 
 type ToolsConfig struct {

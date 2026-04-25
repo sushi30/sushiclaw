@@ -33,7 +33,7 @@ func TestFilter_SystemChannel(t *testing.T) {
 func TestFilter_KnownCommands(t *testing.T) {
 	f := NewCommandFilter()
 	cases := []string{
-		"/start", "/help", "/show", "/list", "/use",
+		"/start", "/help", "/welcome", "/show", "/list", "/use",
 		"/switch", "/check", "/clear", "/subagents", "/reload",
 	}
 	for _, cmd := range cases {
@@ -99,6 +99,11 @@ func TestFilter_BangPrefix(t *testing.T) {
 	dec := f.Filter(msg("!help"))
 	if dec.Result != Pass {
 		t.Errorf("!help should pass as known command, got %v", dec.Result)
+	}
+
+	dec = f.Filter(msg("!welcome"))
+	if dec.Result != Pass {
+		t.Errorf("!welcome should pass as known command, got %v", dec.Result)
 	}
 
 	dec = f.Filter(msg("!unknown"))

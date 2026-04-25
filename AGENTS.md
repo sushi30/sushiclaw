@@ -186,6 +186,7 @@ can report this as an error.
 | `channels` | Map of channel configs (WhatsApp native, Telegram). Email is **not** here — see `email_channel` |
 | `email_channel` | Top-level email config (SMTP + IMAP). See `pkg/channels/email/` |
 | `gateway` | `host`, `port`, `log_level` |
+| `onboarding` | `auto.enabled` — show onboarding on first Telegram/WhatsApp direct message |
 | `tools` | `exec.enabled`, `media_cleanup.enabled`, `media_cleanup.max_age`, `media_cleanup.interval` |
 
 ### Workspace files
@@ -223,6 +224,7 @@ Built-in commands (defined in `pkg/commands/commands.go`):
 | Command | Description |
 |---------|-------------|
 | `/start` | Greeting |
+| `/welcome` | Show onboarding and quick actions |
 | `/help` | List available commands |
 | `/clear` | Clear conversation history |
 | `/debug` | Toggle debug event forwarding |

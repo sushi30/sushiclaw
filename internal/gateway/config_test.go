@@ -48,4 +48,7 @@ func TestLoadExampleConfig(t *testing.T) {
 	if cfg.Gateway.Port != 18800 {
 		t.Errorf("gateway.port = %d, want 18800", cfg.Gateway.Port)
 	}
+	if cfg.Onboarding.Auto.Enabled {
+		t.Error("onboarding.auto.enabled = true, want false")
+	}
 }

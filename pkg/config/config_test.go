@@ -18,7 +18,41 @@ func TestParseExampleConfig(t *testing.T) {
 	assert.NotEmpty(t, cfg.ModelList)
 	assert.Equal(t, "claude-sonnet", cfg.ModelList[0].ModelName)
 	assert.Equal(t, 18800, cfg.Gateway.Port)
+	assert.False(t, cfg.Onboarding.Auto.Enabled)
 	assert.NotNil(t, cfg.Channels["telegram"])
+}
+
+func TestOnboardingConfigDefaultsDisabledWhenMissing(t *testing.T) {
+	jsonData := `{
+		"version": 2,
+		"agents": {"defaults": {"model_name": "test"}},
+		"model_list": [{"model_name": "test", "model": "gpt-4", "api_key": "test-key"}],
+		"channels": {},
+		"gateway": {"host": "0.0.0.0", "port": 18800, "log_level": "info"},
+		"tools": {"media_cleanup": {"enabled": false}, "exec": {"enabled": false}}
+	}`
+
+	var cfg config.Config
+	err := json.Unmarshal([]byte(jsonData), &cfg)
+	require.NoError(t, err)
+	assert.False(t, cfg.Onboarding.Auto.Enabled)
+}
+
+func TestOnboardingConfigParsing(t *testing.T) {
+	jsonData := `{
+		"version": 2,
+		"agents": {"defaults": {"model_name": "test"}},
+		"model_list": [{"model_name": "test", "model": "gpt-4", "api_key": "test-key"}],
+		"channels": {},
+		"gateway": {"host": "0.0.0.0", "port": 18800, "log_level": "info"},
+		"onboarding": {"auto": {"enabled": true}},
+		"tools": {"media_cleanup": {"enabled": false}, "exec": {"enabled": false}}
+	}`
+
+	var cfg config.Config
+	err := json.Unmarshal([]byte(jsonData), &cfg)
+	require.NoError(t, err)
+	assert.True(t, cfg.Onboarding.Auto.Enabled)
 }
 
 func TestChannelDecode(t *testing.T) {

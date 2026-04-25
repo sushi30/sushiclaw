@@ -114,6 +114,28 @@ Resolved at load time by `pkg/config.SecureString` during JSON unmarshal.
 
 ---
 
+### MCP server support
+
+Connect the agent to [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) servers for external tools (filesystem, GitHub, databases, etc.).
+
+```json
+{
+  "mcp": {
+    "mcpServers": {
+      "github": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-github"],
+        "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "env://GITHUB_TOKEN" }
+      }
+    }
+  }
+}
+```
+
+See [docs/MCP.md](docs/MCP.md) for full configuration options and examples.
+
+---
+
 ### WhatsApp voice memo transcription
 
 Incoming WhatsApp audio messages are transcribed before reaching the agent. Powered by the ASR provider in the `voice` config block. Set `echo_transcription: true` to send the transcript back to the sender.

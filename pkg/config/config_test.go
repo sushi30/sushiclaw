@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -48,4 +49,51 @@ func TestFlexibleStringSlice(t *testing.T) {
 	require.NotNil(t, tgCh)
 	// allow_from is [] in example config
 	assert.Empty(t, tgCh.AllowFrom)
+}
+
+func TestMCPConfigParsing(t *testing.T) {
+	cfg, err := config.LoadConfig("../../config.example.json")
+	require.NoError(t, err)
+
+	require.NotEmpty(t, cfg.MCP.MCPServers)
+	assert.Contains(t, cfg.MCP.MCPServers, "github")
+	assert.Contains(t, cfg.MCP.MCPServers, "filesystem")
+
+	gh := cfg.MCP.MCPServers["github"]
+	assert.Equal(t, "npx", gh.Command)
+	assert.Equal(t, []string{"-y", "@modelcontextprotocol/server-github"}, gh.Args)
+	assert.Equal(t, "env://GITHUB_TOKEN", gh.Env["GITHUB_PERSONAL_ACCESS_TOKEN"])
+
+	fs := cfg.MCP.MCPServers["filesystem"]
+	assert.Equal(t, "npx", fs.Command)
+	assert.Equal(t, []string{"-y", "@modelcontextprotocol/server-filesystem", "/home/user/workspace"}, fs.Args)
+}
+
+func TestMCPConfigTokenEnvResolve(t *testing.T) {
+	t.Setenv("MCP_TEST_TOKEN", "resolved-token")
+
+	jsonData := `{
+		"version": 2,
+		"agents": {"defaults": {"model_name": "test"}},
+		"model_list": [{"model_name": "test", "api_key": "test-key"}],
+		"channels": {},
+		"gateway": {"host": "0.0.0.0", "port": 18800, "log_level": "info"},
+		"tools": {"media_cleanup": {"enabled": false}, "exec": {"enabled": false}},
+		"mcp": {
+			"mcpServers": {
+				"remote": {
+					"url": "http://localhost:3000/mcp",
+					"token": "env://MCP_TEST_TOKEN"
+				}
+			}
+		}
+	}`
+
+	var cfg config.Config
+	err := json.Unmarshal([]byte(jsonData), &cfg)
+	require.NoError(t, err)
+
+	remote := cfg.MCP.MCPServers["remote"]
+	require.NotNil(t, remote.Token)
+	assert.Equal(t, "resolved-token", remote.Token.String())
 }

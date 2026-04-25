@@ -97,3 +97,34 @@ func TestMCPConfigTokenEnvResolve(t *testing.T) {
 	require.NotNil(t, remote.Token)
 	assert.Equal(t, "resolved-token", remote.Token.String())
 }
+
+func TestWebSearchConfigParsing(t *testing.T) {
+	jsonData := `{
+		"version": 2,
+		"agents": {"defaults": {"model_name": "test"}},
+		"model_list": [{"model_name": "test", "api_key": "test-key"}],
+		"channels": {},
+		"gateway": {"host": "0.0.0.0", "port": 18800, "log_level": "info"},
+		"tools": {
+			"media_cleanup": {"enabled": false},
+			"exec": {"enabled": false},
+			"web_search": {
+				"enabled": true,
+				"provider": "brave",
+				"max_results": 7,
+				"brave": {"enabled": true, "api_key": "env://BRAVE_API_KEY"},
+				"duckduckgo": {"enabled": false}
+			}
+		}
+	}`
+
+	var cfg config.Config
+	err := json.Unmarshal([]byte(jsonData), &cfg)
+	require.NoError(t, err)
+	assert.True(t, cfg.Tools.WebSearch.Enabled)
+	assert.Equal(t, "brave", cfg.Tools.WebSearch.Provider)
+	assert.Equal(t, 7, cfg.Tools.WebSearch.MaxResults)
+	assert.True(t, cfg.Tools.WebSearch.Brave.Enabled)
+	assert.Equal(t, "env://BRAVE_API_KEY", cfg.Tools.WebSearch.Brave.APIKey.String())
+	assert.False(t, cfg.Tools.WebSearch.DuckDuckGo.Enabled)
+}

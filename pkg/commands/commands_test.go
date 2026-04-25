@@ -169,8 +169,8 @@ func TestExecutePassthroughNoHandler(t *testing.T) {
 	reg := commands.NewRegistry(commands.BuiltinDefinitions())
 	exec := commands.NewExecutor(reg, &commands.Runtime{})
 
-	// /debug has no handler — should pass through to agent
-	result := exec.Execute(context.Background(), commands.Request{Text: "/debug"})
+	// /show has no handler — should pass through to agent
+	result := exec.Execute(context.Background(), commands.Request{Text: "/show"})
 	assert.Equal(t, commands.OutcomePassthrough, result.Outcome)
 }
 

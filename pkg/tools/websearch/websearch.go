@@ -85,8 +85,10 @@ func buildProvider(cfg config.WebSearchToolConfig) (Provider, error) {
 	}
 }
 
-func (t *WebSearchTool) Name() string        { return "web_search" }
-func (t *WebSearchTool) Description() string { return fmt.Sprintf("Search the web for current information, news, facts, and links using %s. Returns a list of results with titles, URLs, and descriptions.", t.provider.Name()) }
+func (t *WebSearchTool) Name() string { return "web_search" }
+func (t *WebSearchTool) Description() string {
+	return fmt.Sprintf("Search the web for current information, news, facts, and links using %s. Returns a list of results with titles, URLs, and descriptions.", t.provider.Name())
+}
 
 func (t *WebSearchTool) Parameters() map[string]interfaces.ParameterSpec {
 	return map[string]interfaces.ParameterSpec{

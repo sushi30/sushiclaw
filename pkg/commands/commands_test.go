@@ -174,6 +174,85 @@ func TestExecutePassthroughNoHandler(t *testing.T) {
 	assert.Equal(t, commands.OutcomePassthrough, result.Outcome)
 }
 
+func TestExecuteListSkills(t *testing.T) {
+	reg := commands.NewRegistry(commands.BuiltinDefinitions())
+	rt := &commands.Runtime{
+		ListSkills: func() []commands.SkillInfo {
+			return []commands.SkillInfo{
+				{Name: "python", Description: "Python coding help"},
+				{Name: "review"},
+			}
+		},
+	}
+	exec := commands.NewExecutor(reg, rt)
+
+	var replied string
+	result := exec.Execute(context.Background(), commands.Request{
+		Text:  "/list skills",
+		Reply: func(s string) error { replied = s; return nil },
+	})
+	assert.Equal(t, commands.OutcomeHandled, result.Outcome)
+	assert.Contains(t, replied, "Available skills:")
+	assert.Contains(t, replied, "• python — Python coding help")
+	assert.Contains(t, replied, "• review")
+}
+
+func TestExecuteListSkillsNoRuntime(t *testing.T) {
+	reg := commands.NewRegistry(commands.BuiltinDefinitions())
+	exec := commands.NewExecutor(reg, &commands.Runtime{})
+
+	var replied string
+	result := exec.Execute(context.Background(), commands.Request{
+		Text:  "/list skills",
+		Reply: func(s string) error { replied = s; return nil },
+	})
+	assert.Equal(t, commands.OutcomeHandled, result.Outcome)
+	assert.Equal(t, "Skill list unavailable.", replied)
+}
+
+func TestExecuteListSkillsEmpty(t *testing.T) {
+	reg := commands.NewRegistry(commands.BuiltinDefinitions())
+	rt := &commands.Runtime{
+		ListSkills: func() []commands.SkillInfo { return nil },
+	}
+	exec := commands.NewExecutor(reg, rt)
+
+	var replied string
+	result := exec.Execute(context.Background(), commands.Request{
+		Text:  "/list skills",
+		Reply: func(s string) error { replied = s; return nil },
+	})
+	assert.Equal(t, commands.OutcomeHandled, result.Outcome)
+	assert.Equal(t, "No skills available.", replied)
+}
+
+func TestExecuteListUsageIncludesSkills(t *testing.T) {
+	reg := commands.NewRegistry(commands.BuiltinDefinitions())
+	exec := commands.NewExecutor(reg, &commands.Runtime{})
+
+	var replied string
+	result := exec.Execute(context.Background(), commands.Request{
+		Text:  "/list",
+		Reply: func(s string) error { replied = s; return nil },
+	})
+	assert.Equal(t, commands.OutcomeHandled, result.Outcome)
+	assert.Contains(t, replied, "/list [models|skills]")
+}
+
+func TestExecuteListUnknownOptionIncludesSkills(t *testing.T) {
+	reg := commands.NewRegistry(commands.BuiltinDefinitions())
+	exec := commands.NewExecutor(reg, &commands.Runtime{})
+
+	var replied string
+	result := exec.Execute(context.Background(), commands.Request{
+		Text:  "/list widgets",
+		Reply: func(s string) error { replied = s; return nil },
+	})
+	assert.Equal(t, commands.OutcomeHandled, result.Outcome)
+	assert.Contains(t, replied, "Unknown option: widgets")
+	assert.Contains(t, replied, "/list [models|skills]")
+}
+
 func TestExecuteUseSuccess(t *testing.T) {
 	reg := commands.NewRegistry(commands.BuiltinDefinitions())
 	rt := &commands.Runtime{

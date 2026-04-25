@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sushi30/sushiclaw/pkg/commands"
 	"github.com/sushi30/sushiclaw/pkg/logger"
 )
 
@@ -162,32 +163,45 @@ func (b *ContextBuilder) captureBaseline() (map[string]time.Time, map[string]boo
 
 // skillsSummary walks skills/ and builds a markdown summary block.
 func (b *ContextBuilder) skillsSummary(skillsDir string) string {
-	entries, err := os.ReadDir(skillsDir)
-	if err != nil {
+	skills := listSkillsInDir(skillsDir)
+	if len(skills) == 0 {
 		return ""
 	}
 
-	var lines []string
+	lines := make([]string, 0, len(skills))
+	for _, skill := range skills {
+		lines = append(lines, "- **"+skill.Name+"**: "+skill.Description)
+	}
+
+	return "## Skills\n\n" + strings.Join(lines, "\n")
+}
+
+func listSkillsInDir(skillsDir string) []commands.SkillInfo {
+	entries, err := os.ReadDir(skillsDir)
+	if err != nil {
+		return nil
+	}
+
+	skills := make([]commands.SkillInfo, 0, len(entries))
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
 		skillFile := filepath.Join(skillsDir, e.Name(), "SKILL.md")
-		content, ok := b.readFileIfExists(skillFile)
-		if !ok {
+		content, err := os.ReadFile(skillFile)
+		if err != nil {
 			continue
 		}
-		desc := firstDescriptionLine(content)
+		desc := skillDescription(string(content))
 		if desc == "" {
 			desc = e.Name()
 		}
-		lines = append(lines, "- **"+e.Name()+"**: "+desc)
+		skills = append(skills, commands.SkillInfo{
+			Name:        e.Name(),
+			Description: desc,
+		})
 	}
-
-	if len(lines) == 0 {
-		return ""
-	}
-	return "## Skills\n\n" + strings.Join(lines, "\n")
+	return skills
 }
 
 // readFileIfExists returns the file content and whether the file existed.
@@ -215,6 +229,33 @@ func parseMarkdownBody(content string) string {
 	}
 	body := strings.TrimSpace(rest[idx+4:])
 	return body
+}
+
+func skillDescription(content string) string {
+	if desc := frontmatterDescription(content); desc != "" {
+		return desc
+	}
+	return firstDescriptionLine(content)
+}
+
+func frontmatterDescription(content string) string {
+	content = strings.TrimSpace(content)
+	if !strings.HasPrefix(content, "---") {
+		return ""
+	}
+	rest := content[3:]
+	idx := strings.Index(rest, "\n---")
+	if idx == -1 {
+		return ""
+	}
+	for _, line := range strings.Split(rest[:idx], "\n") {
+		key, value, ok := strings.Cut(strings.TrimSpace(line), ":")
+		if !ok || strings.TrimSpace(key) != "description" {
+			continue
+		}
+		return strings.Trim(strings.TrimSpace(value), `"'`)
+	}
+	return ""
 }
 
 // firstDescriptionLine returns the first non-blank, non-frontmatter line from

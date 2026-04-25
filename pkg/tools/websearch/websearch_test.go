@@ -137,7 +137,7 @@ func (m *mockProvider) Search(_ context.Context, query string, maxResults int) (
 }
 
 func TestBraveProvider_Search(t *testing.T) {
-	 srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "GET", r.Method)
 		assert.Equal(t, "test-key", r.Header.Get("X-Subscription-Token"))
 		assert.Equal(t, "test", r.URL.Query().Get("q"))

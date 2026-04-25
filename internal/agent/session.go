@@ -3,7 +3,10 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	agentsdk "github.com/Ingenimax/agent-sdk-go/pkg/agent"
@@ -11,6 +14,7 @@ import (
 	"github.com/Ingenimax/agent-sdk-go/pkg/llm/openai"
 
 	"github.com/sushi30/sushiclaw/pkg/bus"
+	"github.com/sushi30/sushiclaw/pkg/commands"
 	"github.com/sushi30/sushiclaw/pkg/config"
 	"github.com/sushi30/sushiclaw/pkg/llm/openrouter"
 	"github.com/sushi30/sushiclaw/pkg/logger"
@@ -19,11 +23,12 @@ import (
 
 // SessionManager wraps an agent-sdk-go Agent and processes inbound bus messages.
 type SessionManager struct {
-	agent *agentsdk.Agent
-	bus   *bus.MessageBus
-	mem   *InMemoryMemory
-	cfg   *config.Config
-	tools []interfaces.Tool
+	agent           *agentsdk.Agent
+	bus             *bus.MessageBus
+	mem             *InMemoryMemory
+	cfg             *config.Config
+	tools           []interfaces.Tool
+	activatedSkills map[string]bool
 }
 
 // BuildAgent creates an agent-sdk-go Agent from config and tools.
@@ -120,17 +125,54 @@ func NewSessionManager(cfg *config.Config, messageBus *bus.MessageBus, tools []i
 	}
 
 	return &SessionManager{
-		agent: a,
-		bus:   messageBus,
-		mem:   mem,
-		cfg:   cfg,
-		tools: tools,
+		agent:           a,
+		bus:             messageBus,
+		mem:             mem,
+		cfg:             cfg,
+		tools:           tools,
+		activatedSkills: make(map[string]bool),
 	}, nil
 }
 
 // ClearHistory resets the agent's conversation memory.
 func (sm *SessionManager) ClearHistory() error {
 	return sm.mem.Clear(context.Background())
+}
+
+// ActivateSkill reads a skill's SKILL.md and injects it into the conversation
+// memory as a system message. If the skill is already loaded, it returns
+// commands.ErrSkillAlreadyLoaded.
+func (sm *SessionManager) ActivateSkill(skillName string) error {
+	if sm.activatedSkills[skillName] {
+		return commands.ErrSkillAlreadyLoaded
+	}
+
+	ws := sm.cfg.WorkspacePath()
+	if ws == "" {
+		return errors.New("no workspace configured")
+	}
+
+	skillPath := filepath.Join(ws, "skills", skillName, "SKILL.md")
+	content, err := os.ReadFile(skillPath)
+	if err != nil {
+		return fmt.Errorf("skill %q not found", skillName)
+	}
+
+	skillContent := strings.TrimSpace(string(content))
+	if skillContent == "" {
+		return fmt.Errorf("skill %q is empty", skillName)
+	}
+
+	msg := interfaces.Message{
+		Role:    interfaces.MessageRoleSystem,
+		Content: skillContent,
+	}
+	if err := sm.mem.AddMessage(context.Background(), msg); err != nil {
+		return fmt.Errorf("inject skill into memory: %w", err)
+	}
+
+	sm.activatedSkills[skillName] = true
+	return nil
 }
 
 // ListModels returns all configured model names.
@@ -170,6 +212,11 @@ func (sm *SessionManager) ToolNames() []string {
 		names[i] = t.Name()
 	}
 	return names
+}
+
+// GetMessages returns all messages in the session memory.
+func (sm *SessionManager) GetMessages(ctx context.Context) ([]interfaces.Message, error) {
+	return sm.mem.GetMessages(ctx)
 }
 
 // Chat runs a single turn against the agent and returns the response.

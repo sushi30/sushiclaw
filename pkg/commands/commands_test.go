@@ -169,9 +169,70 @@ func TestExecutePassthroughNoHandler(t *testing.T) {
 	reg := commands.NewRegistry(commands.BuiltinDefinitions())
 	exec := commands.NewExecutor(reg, &commands.Runtime{})
 
-	// /use has no handler — should pass through to agent
-	result := exec.Execute(context.Background(), commands.Request{Text: "/use"})
+	// /debug has no handler — should pass through to agent
+	result := exec.Execute(context.Background(), commands.Request{Text: "/debug"})
 	assert.Equal(t, commands.OutcomePassthrough, result.Outcome)
+}
+
+func TestExecuteUseSuccess(t *testing.T) {
+	reg := commands.NewRegistry(commands.BuiltinDefinitions())
+	rt := &commands.Runtime{
+		ActivateSkill: func(name string) error { return nil },
+	}
+	exec := commands.NewExecutor(reg, rt)
+
+	var replied string
+	result := exec.Execute(context.Background(), commands.Request{
+		Text:  "/use python",
+		Reply: func(s string) error { replied = s; return nil },
+	})
+	assert.Equal(t, commands.OutcomeHandled, result.Outcome)
+	assert.Equal(t, "Skill python activated.", replied)
+}
+
+func TestExecuteUseMissingArg(t *testing.T) {
+	reg := commands.NewRegistry(commands.BuiltinDefinitions())
+	exec := commands.NewExecutor(reg, &commands.Runtime{})
+
+	var replied string
+	result := exec.Execute(context.Background(), commands.Request{
+		Text:  "/use",
+		Reply: func(s string) error { replied = s; return nil },
+	})
+	assert.Equal(t, commands.OutcomeHandled, result.Outcome)
+	assert.Contains(t, replied, "Usage: /use <skill-name>")
+}
+
+func TestExecuteUseAlreadyLoaded(t *testing.T) {
+	reg := commands.NewRegistry(commands.BuiltinDefinitions())
+	rt := &commands.Runtime{
+		ActivateSkill: func(name string) error { return commands.ErrSkillAlreadyLoaded },
+	}
+	exec := commands.NewExecutor(reg, rt)
+
+	var replied string
+	result := exec.Execute(context.Background(), commands.Request{
+		Text:  "/use python",
+		Reply: func(s string) error { replied = s; return nil },
+	})
+	assert.Equal(t, commands.OutcomeHandled, result.Outcome)
+	assert.Equal(t, "Skill python is already loaded.", replied)
+}
+
+func TestExecuteUseCallbackError(t *testing.T) {
+	reg := commands.NewRegistry(commands.BuiltinDefinitions())
+	rt := &commands.Runtime{
+		ActivateSkill: func(name string) error { return assert.AnError },
+	}
+	exec := commands.NewExecutor(reg, rt)
+
+	var replied string
+	result := exec.Execute(context.Background(), commands.Request{
+		Text:  "/use python",
+		Reply: func(s string) error { replied = s; return nil },
+	})
+	assert.Equal(t, commands.OutcomeHandled, result.Outcome)
+	assert.Contains(t, replied, "Failed to activate skill")
 }
 
 func TestExecuteUnrecognizedReturnsPassthrough(t *testing.T) {

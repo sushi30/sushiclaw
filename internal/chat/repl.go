@@ -31,7 +31,7 @@ type Runner struct {
 func NewRunner(cfg *config.Config) (*Runner, error) {
 	var tools []interfaces.Tool
 	if cfg.Tools.IsToolEnabled("exec") {
-		wd := cfg.Agents.Defaults.Workspace
+		wd := cfg.WorkspacePath()
 		restrict := cfg.Agents.Defaults.RestrictToWorkspace
 		tools = append(tools, exec.NewExecTool(wd, restrict, true))
 	}

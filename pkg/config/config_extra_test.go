@@ -140,15 +140,17 @@ func TestLoadConfig_ValidFile(t *testing.T) {
 
 func TestToolsConfig_IsToolEnabled(t *testing.T) {
 	cfg := config.ToolsConfig{
-		Exec:      config.ExecToolConfig{Enabled: true},
-		ReadFile:  config.ToolConfig{Enabled: true},
-		WriteFile: config.ToolConfig{Enabled: true},
-		ListDir:   config.ToolConfig{Enabled: true},
+		Exec:        config.ExecToolConfig{Enabled: true},
+		ReadFile:    config.ToolConfig{Enabled: true},
+		WriteFile:   config.ToolConfig{Enabled: true},
+		ListDir:     config.ToolConfig{Enabled: true},
+		SecureInput: config.ToolConfig{Enabled: true},
 	}
 	assert.True(t, cfg.IsToolEnabled("exec"))
 	assert.True(t, cfg.IsToolEnabled("read_file"))
 	assert.True(t, cfg.IsToolEnabled("write_file"))
 	assert.True(t, cfg.IsToolEnabled("list_dir"))
+	assert.True(t, cfg.IsToolEnabled("secure_input"))
 	assert.False(t, cfg.IsToolEnabled("other"))
 }
 

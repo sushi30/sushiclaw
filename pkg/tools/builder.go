@@ -5,7 +5,10 @@ import (
 	"github.com/sushi30/sushiclaw/pkg/config"
 	"github.com/sushi30/sushiclaw/pkg/tools/exec"
 	fstools "github.com/sushi30/sushiclaw/pkg/tools/fs"
+	"github.com/sushi30/sushiclaw/pkg/tools/secureinput"
 )
+
+var defaultSecureInputStore = secureinput.NewStore()
 
 // NewChatTools returns tools available to the local terminal chat.
 func NewChatTools(cfg *config.Config) []interfaces.Tool {
@@ -13,7 +16,7 @@ func NewChatTools(cfg *config.Config) []interfaces.Tool {
 	if cfg.Tools.IsToolEnabled("exec") {
 		out = append(out, exec.NewExecTool(workspacePath(cfg), restrictToWorkspace(cfg), true))
 	}
-	return out
+	return withSecureInput(cfg, out)
 }
 
 // NewGatewayTools returns tools available to remote gateway sessions.
@@ -26,7 +29,17 @@ func NewGatewayTools(cfg *config.Config, execAllowedSenders []string) ([]interfa
 		}
 		out = append(out, trustedExec)
 	}
-	return out, nil
+	return withSecureInput(cfg, out), nil
+}
+
+// ClearSecureInputs clears captured secure values for one chat/session.
+func ClearSecureInputs(chatID string) {
+	defaultSecureInputStore.ClearSession(chatID)
+}
+
+// ClearAllSecureInputs clears all captured secure values.
+func ClearAllSecureInputs() {
+	defaultSecureInputStore.ClearAll()
 }
 
 func newFileTools(cfg *config.Config) []interfaces.Tool {
@@ -44,6 +57,14 @@ func newFileTools(cfg *config.Config) []interfaces.Tool {
 		out = append(out, fstools.NewListDirTool(workspace, restrict))
 	}
 	return out
+}
+
+func withSecureInput(cfg *config.Config, out []interfaces.Tool) []interfaces.Tool {
+	if cfg == nil || !cfg.Tools.IsToolEnabled("secure_input") {
+		return out
+	}
+	out = secureinput.WrapAll(out, defaultSecureInputStore)
+	return append([]interfaces.Tool{secureinput.NewTool(defaultSecureInputStore, nil)}, out...)
 }
 
 func workspacePath(cfg *config.Config) string {

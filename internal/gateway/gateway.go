@@ -68,7 +68,8 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 	reg := commands.NewRegistry(commands.BuiltinDefinitions())
 	dm := NewDebugManager(messageBus)
 	rt := &commands.Runtime{
-		ListDefinitions: reg.Definitions,
+		ListDefinitions:   reg.Definitions,
+		ClearSecureInputs: sushitools.ClearSecureInputs,
 	}
 
 	allowedSenders := sushitools.ParseAllowedSenders()

@@ -89,6 +89,9 @@
     },
     "list_dir": {
       "enabled": true
+    },
+    "secure_input": {
+      "enabled": false
     }
   },
   "mcp": {

@@ -82,6 +82,7 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 		logger.InfoCF("gateway", "Trusted exec registered",
 			map[string]any{"senders": allowedSenders})
 	}
+	tools = sushitools.MaybeAppendSpawnTool(tools, cfg, agent.BuildSubagent)
 
 	if cfg.Tools.IsToolEnabled("web_search") {
 		wsTool, err := websearch.NewTool(cfg.Tools.WebSearch)
@@ -151,6 +152,14 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 		rt.ListModels = sessionMgr.ListModels
 		rt.ListSkills = sessionMgr.ListSkills
 		rt.ActivateSkill = sessionMgr.ActivateSkill
+		rt.ListSubAgents = sessionMgr.ListSubAgents
+	}
+
+	// Inject message bus into any tool that needs it (e.g. async spawn).
+	for _, t := range tools {
+		if st, ok := t.(interface{ SetBus(*bus.MessageBus) }); ok {
+			st.SetBus(messageBus)
+		}
 	}
 	executor := commands.NewExecutor(reg, rt)
 

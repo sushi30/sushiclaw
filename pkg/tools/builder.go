@@ -5,8 +5,12 @@ import (
 	"github.com/sushi30/sushiclaw/pkg/config"
 	"github.com/sushi30/sushiclaw/pkg/tools/exec"
 	fstools "github.com/sushi30/sushiclaw/pkg/tools/fs"
+	"github.com/sushi30/sushiclaw/pkg/tools/spawn"
 	"github.com/sushi30/sushiclaw/pkg/tools/websearch"
 )
+
+// SpawnFactory is the constructor signature for a sub-agent factory.
+type SpawnFactory = spawn.SubAgentFactory
 
 // NewChatTools returns tools available to the local terminal chat.
 func NewChatTools(cfg *config.Config) []interfaces.Tool {
@@ -61,4 +65,25 @@ func workspacePath(cfg *config.Config) string {
 
 func restrictToWorkspace(cfg *config.Config) bool {
 	return cfg != nil && cfg.Agents.Defaults.RestrictToWorkspace
+}
+
+// ToolsWithoutSpawn returns a copy of the tool slice with the spawn tool removed.
+// Use this when building sub-agents to prevent infinite recursion.
+func ToolsWithoutSpawn(tools []interfaces.Tool) []interfaces.Tool {
+	out := make([]interfaces.Tool, 0, len(tools))
+	for _, t := range tools {
+		if t.Name() == "spawn" {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
+}
+
+// MaybeAppendSpawnTool appends the spawn tool if enabled in config.
+func MaybeAppendSpawnTool(tools []interfaces.Tool, cfg *config.Config, factory SpawnFactory) []interfaces.Tool {
+	if !cfg.Tools.IsToolEnabled("spawn") {
+		return tools
+	}
+	return append(tools, spawn.NewSpawnTool(cfg, ToolsWithoutSpawn(tools), factory))
 }

@@ -65,6 +65,7 @@ type Runtime struct {
 	ListDefinitions func() []Definition
 	ListModels      func() []string
 	ListSkills      func() []SkillInfo
+	ListSubAgents   func() []string
 	ClearHistory    func() error
 	ToggleDebug     func(ctx context.Context, channel, chatID string) string
 	ActivateSkill   func(skillName string) error
@@ -267,7 +268,7 @@ func BuiltinDefinitions() []Definition {
 		{Name: "btw", Description: "Add a note to conversation context"},
 		{Name: "switch", Description: "Switch model or channel"},
 		{Name: "check", Description: "Check system status"},
-		{Name: "subagents", Description: "Manage subagents"},
+		{Name: "subagents", Description: "Manage subagents", Handler: subagentsHandler},
 		{Name: "reload", Description: "Reload configuration"},
 	}
 }
@@ -384,4 +385,20 @@ func useHandler(_ context.Context, req Request, rt *Runtime) error {
 		return req.Reply(fmt.Sprintf("Failed to activate skill: %v", err))
 	}
 	return req.Reply(fmt.Sprintf("Skill %s activated.", skillName))
+}
+
+func subagentsHandler(_ context.Context, req Request, rt *Runtime) error {
+	if rt == nil || rt.ListSubAgents == nil {
+		return req.Reply("Subagent list unavailable.")
+	}
+	agents := rt.ListSubAgents()
+	if len(agents) == 0 {
+		return req.Reply("No subagents configured.")
+	}
+	var sb strings.Builder
+	sb.WriteString("Configured subagents:\n")
+	for _, name := range agents {
+		sb.WriteString("• " + name + "\n")
+	}
+	return req.Reply(strings.TrimRight(sb.String(), "\n"))
 }

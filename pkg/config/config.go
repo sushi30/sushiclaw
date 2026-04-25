@@ -17,14 +17,15 @@ const (
 
 // Config is the top-level sushiclaw configuration.
 type Config struct {
-	Version      int            `json:"version,omitempty"`
-	Agents       AgentsConfig   `json:"agents"`
-	ModelList    []ModelConfig  `json:"model_list"`
-	Channels     ChannelsConfig `json:"channels"`
-	EmailChannel *EmailChanCfg  `json:"email_channel,omitempty"`
-	Gateway      GatewayConfig  `json:"gateway"`
-	Tools        ToolsConfig    `json:"tools"`
-	MCP          MCPConfig      `json:"mcp,omitempty"`
+	Version      int                       `json:"version,omitempty"`
+	Agents       AgentsConfig              `json:"agents"`
+	ModelList    []ModelConfig             `json:"model_list"`
+	Channels     ChannelsConfig            `json:"channels"`
+	EmailChannel *EmailChanCfg             `json:"email_channel,omitempty"`
+	Gateway      GatewayConfig             `json:"gateway"`
+	Tools        ToolsConfig               `json:"tools"`
+	MCP          MCPConfig                 `json:"mcp,omitempty"`
+	SubAgents    map[string]SubAgentConfig `json:"subagents,omitempty"`
 }
 
 // MCPConfig holds MCP server configuration.
@@ -89,6 +90,7 @@ type ToolsConfig struct {
 	WriteFile    ToolConfig          `json:"write_file"`
 	ListDir      ToolConfig          `json:"list_dir"`
 	WebSearch    WebSearchToolConfig `json:"web_search"`
+	Spawn        ToolConfig          `json:"spawn"`
 }
 
 func (t ToolsConfig) IsToolEnabled(name string) bool {
@@ -103,8 +105,17 @@ func (t ToolsConfig) IsToolEnabled(name string) bool {
 		return t.ListDir.Enabled
 	case "web_search":
 		return t.WebSearch.Enabled
+	case "spawn":
+		return t.Spawn.Enabled
 	}
 	return false
+}
+
+// SubAgentConfig holds configuration for a named subagent profile.
+type SubAgentConfig struct {
+	ModelName    string `json:"model_name,omitempty"`
+	Description  string `json:"description,omitempty"`
+	SystemPrompt string `json:"system_prompt,omitempty"`
 }
 
 type ToolConfig struct {

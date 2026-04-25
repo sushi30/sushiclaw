@@ -4,7 +4,7 @@
 
 ### What changed
 
-The email channel is wired manually outside picoclaw's channel registry.
+The email channel is wired manually outside the standard channel registry.
 This means email config must live under the top-level `email_channel` key,
 **not** inside the `channels` map.
 

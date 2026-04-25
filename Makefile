@@ -10,7 +10,7 @@ LDFLAGS     := -X $(VERSION_PKG).Version=$(VERSION) \
                -X $(VERSION_PKG).BuildTime=$(BUILDTIME) \
                -X $(VERSION_PKG).GoVersion=$(GOVER)
 
-.PHONY: build test install lint fmt vet deps sync-picoclaw test-integration release-check
+.PHONY: build test install lint fmt vet deps test-integration release-check
 
 build:
 	CGO_ENABLED=0 go build -tags whatsapp_native -ldflags "$(LDFLAGS)" -o $(BINARY) .
@@ -43,10 +43,6 @@ vet:
 	go vet ./...
 
 deps:
-	go mod tidy
-
-sync-picoclaw:
-	git submodule update --remote picoclaw
 	go mod tidy
 
 test-integration:

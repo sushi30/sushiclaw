@@ -1,11 +1,8 @@
 # sushiclaw
 
-Personal AI agent built on top of [picoclaw](https://github.com/sipeed/picoclaw).
+Personal AI agent built on top of [`agent-sdk-go`](https://github.com/Ingenimax/agent-sdk-go).
 
 Runs on WhatsApp, Telegram, and Email. Customizable via workspace files and skills.
-
-For general picoclaw concepts see the [picoclaw docs](https://github.com/sipeed/picoclaw).
-This README documents what sushiclaw adds on top.
 
 ---
 
@@ -14,7 +11,7 @@ This README documents what sushiclaw adds on top.
 ### 1. Clone
 
 ```bash
-git clone --recurse-submodules https://github.com/sushi30/sushiclaw.git
+git clone https://github.com/sushi30/sushiclaw.git
 cd sushiclaw
 ```
 
@@ -76,7 +73,7 @@ docker run -d \
   ghcr.io/sushi30/sushiclaw:latest gateway
 ```
 
-Health check hits `http://localhost:18790/health` (picoclaw health server).
+Health check hits `http://localhost:18790/health`.
 
 ---
 
@@ -113,7 +110,7 @@ API keys in `config.json` can reference environment variables:
 { "api_key": "env://ANTHROPIC_API_KEY" }
 ```
 
-Resolved at startup by `internal/envresolve`. Fills a gap in upstream picoclaw (which handles `enc://` and `file://` but not `env://`).
+Resolved at load time by `pkg/config.SecureString` during JSON unmarshal.
 
 ---
 
@@ -208,35 +205,7 @@ make build          # Build binary (whatsapp_native tag required)
 make test           # Run tests
 make lint           # golangci-lint
 make deps           # go mod tidy
-make sync-picoclaw  # Update picoclaw submodule to latest upstream
 ```
-
-### picoclaw submodule
-
-picoclaw is a git submodule at `picoclaw/`. The `go.mod` replace directive points to it:
-
-```
-replace github.com/sipeed/picoclaw => ./picoclaw
-```
-
-To update:
-
-```bash
-make sync-picoclaw
-# commit: picoclaw submodule pointer + go.mod + go.sum
-```
-
-### Syncing channel fixes from upstream
-
-```bash
-git -C picoclaw diff <old-sha>..<new-sha> -- pkg/channels/whatsapp_native/
-git -C picoclaw diff <old-sha>..<new-sha> -- pkg/channels/telegram/
-git -C picoclaw diff <old-sha>..<new-sha> -- pkg/channels/email/
-```
-
-Apply patches manually. Watch for interface changes in:
-- `pkg/channels/base.go` (`channels.Channel`)
-- `pkg/bus/types.go` (`bus.OutboundMessage` / `bus.InboundMessage`)
 
 ---
 

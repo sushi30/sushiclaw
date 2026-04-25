@@ -85,13 +85,27 @@ type GatewayConfig struct {
 type ToolsConfig struct {
 	MediaCleanup MediaCleanupCfg `json:"media_cleanup"`
 	Exec         ExecToolConfig  `json:"exec"`
+	ReadFile     ToolConfig      `json:"read_file"`
+	WriteFile    ToolConfig      `json:"write_file"`
+	ListDir      ToolConfig      `json:"list_dir"`
 }
 
 func (t ToolsConfig) IsToolEnabled(name string) bool {
-	if name == "exec" {
+	switch name {
+	case "exec":
 		return t.Exec.Enabled
+	case "read_file":
+		return t.ReadFile.Enabled
+	case "write_file":
+		return t.WriteFile.Enabled
+	case "list_dir":
+		return t.ListDir.Enabled
 	}
 	return false
+}
+
+type ToolConfig struct {
+	Enabled bool `json:"enabled"`
 }
 
 type ExecToolConfig struct {

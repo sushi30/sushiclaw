@@ -9,7 +9,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Ingenimax/agent-sdk-go/pkg/interfaces"
 	"github.com/sushi30/sushiclaw/internal/agent"
 	"github.com/sushi30/sushiclaw/internal/commandfilter"
 	"github.com/sushi30/sushiclaw/internal/envresolve"
@@ -71,21 +70,15 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 		ListDefinitions: reg.Definitions,
 	}
 
-	var tools []interfaces.Tool
-	if allowedSenders := sushitools.ParseAllowedSenders(); len(allowedSenders) > 0 {
-		if cfg.Tools.IsToolEnabled("exec") {
-			workingDir := cfg.WorkspacePath()
-			restrict := cfg.Agents.Defaults.RestrictToWorkspace
-			trustedExec, err := sushitools.NewTrustedExecTool(cfg, workingDir, restrict, allowedSenders)
-			if err != nil {
-				logger.WarnCF("gateway", "Failed to init trusted exec tool",
-					map[string]any{"error": err.Error()})
-			} else {
-				tools = append(tools, trustedExec)
-				logger.InfoCF("gateway", "Trusted exec registered",
-					map[string]any{"senders": allowedSenders})
-			}
-		}
+	allowedSenders := sushitools.ParseAllowedSenders()
+	tools, err := sushitools.NewGatewayTools(cfg, allowedSenders)
+	if err != nil {
+		logger.WarnCF("gateway", "Failed to init trusted exec tool",
+			map[string]any{"error": err.Error()})
+	}
+	if cfg.Tools.IsToolEnabled("exec") && len(allowedSenders) > 0 && err == nil {
+		logger.InfoCF("gateway", "Trusted exec registered",
+			map[string]any{"senders": allowedSenders})
 	}
 
 	sessionMgr, err := agent.NewSessionManager(cfg, messageBus, tools)
@@ -246,4 +239,3 @@ func GetConfigPath() string {
 	}
 	return filepath.Join(GetHome(), "config.json")
 }
-

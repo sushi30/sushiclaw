@@ -169,3 +169,30 @@ func (l *Logger) Warnf(format string, args ...any) {
 func (l *Logger) Errorf(format string, args ...any) {
 	log(ERROR, l.component, fmt.Sprintf(format, args...), nil)
 }
+
+// QuietLogger is like Logger, but drops debug/info output.
+// Use it for chatty dependencies that should only surface warnings and errors.
+type QuietLogger struct {
+	component string
+}
+
+// NewQuietLogger creates a named logger that suppresses debug/info messages.
+func NewQuietLogger(component string) *QuietLogger {
+	return &QuietLogger{component: component}
+}
+
+// Debugf suppresses debug messages.
+func (l *QuietLogger) Debugf(format string, args ...any) {}
+
+// Infof suppresses info messages.
+func (l *QuietLogger) Infof(format string, args ...any) {}
+
+// Warnf logs a warn message.
+func (l *QuietLogger) Warnf(format string, args ...any) {
+	log(WARN, l.component, fmt.Sprintf(format, args...), nil)
+}
+
+// Errorf logs an error message.
+func (l *QuietLogger) Errorf(format string, args ...any) {
+	log(ERROR, l.component, fmt.Sprintf(format, args...), nil)
+}

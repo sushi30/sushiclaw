@@ -136,6 +136,7 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 		rt.ClearHistory = sessionMgr.ClearHistory
 		rt.GetModelInfo = sessionMgr.GetModelInfo
 		rt.ListModels = sessionMgr.ListModels
+		rt.ActivateSkill = sessionMgr.ActivateSkill
 	}
 	executor := commands.NewExecutor(reg, rt)
 

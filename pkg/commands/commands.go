@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -59,6 +60,7 @@ type Runtime struct {
 	ListModels      func() []string
 	ClearHistory    func() error
 	ToggleDebug     func(ctx context.Context, channel, chatID string) string
+	ActivateSkill   func(skillName string) error
 }
 
 // Registry stores command definitions indexed by name and alias.
@@ -253,7 +255,7 @@ func BuiltinDefinitions() []Definition {
 		{Name: "list", Description: "List available options", SubCommands: []SubCommand{
 			{Name: "models", Description: "List configured models", Handler: listModelsHandler},
 		}},
-		{Name: "use", Description: "Use a specific configuration"},
+		{Name: "use", Description: "Use a specific skill", Handler: useHandler, Usage: "/use <skill-name>"},
 		{Name: "btw", Description: "Add a note to conversation context"},
 		{Name: "switch", Description: "Switch model or channel"},
 		{Name: "check", Description: "Check system status"},
@@ -334,4 +336,24 @@ func debugHandler(ctx context.Context, req Request, rt *Runtime) error {
 	}
 	reply := rt.ToggleDebug(ctx, req.Channel, req.ChatID)
 	return req.Reply(reply)
+}
+
+// ErrSkillAlreadyLoaded is returned when a skill is already active in the session.
+var ErrSkillAlreadyLoaded = errors.New("skill already loaded")
+
+func useHandler(_ context.Context, req Request, rt *Runtime) error {
+	skillName := nthToken(req.Text, 1)
+	if skillName == "" {
+		return req.Reply("Usage: /use <skill-name>")
+	}
+	if rt == nil || rt.ActivateSkill == nil {
+		return req.Reply("Skill activation is not available.")
+	}
+	if err := rt.ActivateSkill(skillName); err != nil {
+		if errors.Is(err, ErrSkillAlreadyLoaded) {
+			return req.Reply(fmt.Sprintf("Skill %s is already loaded.", skillName))
+		}
+		return req.Reply(fmt.Sprintf("Failed to activate skill: %v", err))
+	}
+	return req.Reply(fmt.Sprintf("Skill %s activated.", skillName))
 }

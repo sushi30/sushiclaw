@@ -3,6 +3,7 @@ package agent_test
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/sushi30/sushiclaw/internal/agent"
+	"github.com/sushi30/sushiclaw/pkg/commands"
 	"github.com/sushi30/sushiclaw/pkg/config"
 )
 
@@ -275,4 +277,93 @@ func TestBuildAgent_WithMCPConfig(t *testing.T) {
 	// initialization so no actual server connection is attempted.
 	_, err := agent.BuildAgent(cfg, nil)
 	require.NoError(t, err, "expected BuildAgent to succeed with MCP config")
+}
+
+func TestSessionManager_ActivateSkill(t *testing.T) {
+	ws := t.TempDir()
+	skillsDir := filepath.Join(ws, "skills", "python")
+	require.NoError(t, os.MkdirAll(skillsDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(skillsDir, "SKILL.md"), []byte("You are a Python expert."), 0644))
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{ModelName: "test-model"},
+		},
+		ModelList: []config.ModelConfig{
+			{
+				ModelName: "test-model",
+				Model:     "gpt-4o",
+				APIKey:    config.NewSecureString("test-key"),
+			},
+		},
+	}
+	cfg.Agents.Defaults.Workspace = ws
+
+	sm, err := agent.NewSessionManager(cfg, nil, nil)
+	require.NoError(t, err)
+
+	// First activation should succeed.
+	err = sm.ActivateSkill("python")
+	require.NoError(t, err)
+
+	// Verify the skill content is in memory.
+	msgs, err := sm.GetMessages(context.Background())
+	require.NoError(t, err)
+	require.Len(t, msgs, 1)
+	assert.Equal(t, interfaces.MessageRoleSystem, msgs[0].Role)
+	assert.Equal(t, "You are a Python expert.", msgs[0].Content)
+}
+
+func TestSessionManager_ActivateSkill_AlreadyLoaded(t *testing.T) {
+	ws := t.TempDir()
+	skillsDir := filepath.Join(ws, "skills", "python")
+	require.NoError(t, os.MkdirAll(skillsDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(skillsDir, "SKILL.md"), []byte("You are a Python expert."), 0644))
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{ModelName: "test-model"},
+		},
+		ModelList: []config.ModelConfig{
+			{
+				ModelName: "test-model",
+				Model:     "gpt-4o",
+				APIKey:    config.NewSecureString("test-key"),
+			},
+		},
+	}
+	cfg.Agents.Defaults.Workspace = ws
+
+	sm, err := agent.NewSessionManager(cfg, nil, nil)
+	require.NoError(t, err)
+
+	require.NoError(t, sm.ActivateSkill("python"))
+	err = sm.ActivateSkill("python")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, commands.ErrSkillAlreadyLoaded)
+}
+
+func TestSessionManager_ActivateSkill_NotFound(t *testing.T) {
+	ws := t.TempDir()
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{ModelName: "test-model"},
+		},
+		ModelList: []config.ModelConfig{
+			{
+				ModelName: "test-model",
+				Model:     "gpt-4o",
+				APIKey:    config.NewSecureString("test-key"),
+			},
+		},
+	}
+	cfg.Agents.Defaults.Workspace = ws
+
+	sm, err := agent.NewSessionManager(cfg, nil, nil)
+	require.NoError(t, err)
+
+	err = sm.ActivateSkill("nonexistent")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
 }

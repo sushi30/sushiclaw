@@ -144,11 +144,13 @@ func TestToolsConfig_IsToolEnabled(t *testing.T) {
 		ReadFile:  config.ToolConfig{Enabled: true},
 		WriteFile: config.ToolConfig{Enabled: true},
 		ListDir:   config.ToolConfig{Enabled: true},
+		WebSearch: config.WebSearchToolConfig{Enabled: true},
 	}
 	assert.True(t, cfg.IsToolEnabled("exec"))
 	assert.True(t, cfg.IsToolEnabled("read_file"))
 	assert.True(t, cfg.IsToolEnabled("write_file"))
 	assert.True(t, cfg.IsToolEnabled("list_dir"))
+	assert.True(t, cfg.IsToolEnabled("web_search"))
 	assert.False(t, cfg.IsToolEnabled("other"))
 }
 

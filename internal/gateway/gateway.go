@@ -20,6 +20,7 @@ import (
 	"github.com/sushi30/sushiclaw/pkg/logger"
 	"github.com/sushi30/sushiclaw/pkg/media"
 	sushitools "github.com/sushi30/sushiclaw/pkg/tools"
+	"github.com/sushi30/sushiclaw/pkg/tools/websearch"
 )
 
 const (
@@ -80,6 +81,18 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 	if cfg.Tools.IsToolEnabled("exec") && len(allowedSenders) > 0 && err == nil {
 		logger.InfoCF("gateway", "Trusted exec registered",
 			map[string]any{"senders": allowedSenders})
+	}
+
+	if cfg.Tools.IsToolEnabled("web_search") {
+		wsTool, err := websearch.NewTool(cfg.Tools.WebSearch)
+		if err != nil {
+			logger.WarnCF("gateway", "Failed to init web search tool",
+				map[string]any{"error": err.Error()})
+		} else {
+			tools = append(tools, wsTool)
+			logger.InfoCF("gateway", "Web search tool registered",
+				map[string]any{"provider": cfg.Tools.WebSearch.Provider})
+		}
 	}
 
 	sessionMgr, err := agent.NewSessionManager(cfg, messageBus, tools)

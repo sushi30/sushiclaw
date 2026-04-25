@@ -83,11 +83,12 @@ type GatewayConfig struct {
 }
 
 type ToolsConfig struct {
-	MediaCleanup MediaCleanupCfg `json:"media_cleanup"`
-	Exec         ExecToolConfig  `json:"exec"`
-	ReadFile     ToolConfig      `json:"read_file"`
-	WriteFile    ToolConfig      `json:"write_file"`
-	ListDir      ToolConfig      `json:"list_dir"`
+	MediaCleanup MediaCleanupCfg     `json:"media_cleanup"`
+	Exec         ExecToolConfig      `json:"exec"`
+	ReadFile     ToolConfig          `json:"read_file"`
+	WriteFile    ToolConfig          `json:"write_file"`
+	ListDir      ToolConfig          `json:"list_dir"`
+	WebSearch    WebSearchToolConfig `json:"web_search"`
 }
 
 func (t ToolsConfig) IsToolEnabled(name string) bool {
@@ -100,6 +101,8 @@ func (t ToolsConfig) IsToolEnabled(name string) bool {
 		return t.WriteFile.Enabled
 	case "list_dir":
 		return t.ListDir.Enabled
+	case "web_search":
+		return t.WebSearch.Enabled
 	}
 	return false
 }
@@ -116,6 +119,41 @@ type MediaCleanupCfg struct {
 	Enabled  bool `json:"enabled"`
 	MaxAge   int  `json:"max_age"`
 	Interval int  `json:"interval"`
+}
+
+type WebSearchToolConfig struct {
+	Enabled     bool                    `json:"enabled"`
+	Provider    string                  `json:"provider"`
+	MaxResults  int                     `json:"max_results"`
+	Brave       BraveSearchConfig       `json:"brave,omitempty"`
+	DuckDuckGo  DuckDuckGoSearchConfig  `json:"duckduckgo,omitempty"`
+	Browserbase BrowserbaseSearchConfig `json:"browserbase,omitempty"`
+	Tavily      TavilySearchConfig      `json:"tavily,omitempty"`
+	Baidu       BaiduSearchConfig       `json:"baidu,omitempty"`
+}
+
+type BraveSearchConfig struct {
+	Enabled bool          `json:"enabled"`
+	APIKey  *SecureString `json:"api_key,omitzero"`
+}
+
+type DuckDuckGoSearchConfig struct {
+	Enabled bool `json:"enabled"`
+}
+
+type BrowserbaseSearchConfig struct {
+	Enabled bool          `json:"enabled"`
+	APIKey  *SecureString `json:"api_key,omitzero"`
+}
+
+type TavilySearchConfig struct {
+	Enabled bool          `json:"enabled"`
+	APIKey  *SecureString `json:"api_key,omitzero"`
+}
+
+type BaiduSearchConfig struct {
+	Enabled bool          `json:"enabled"`
+	APIKey  *SecureString `json:"api_key,omitzero"`
 }
 
 // EmailChanCfg is the top-level email_channel config in config.json.

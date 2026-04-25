@@ -5,6 +5,7 @@ import (
 	"github.com/sushi30/sushiclaw/pkg/config"
 	"github.com/sushi30/sushiclaw/pkg/tools/exec"
 	fstools "github.com/sushi30/sushiclaw/pkg/tools/fs"
+	"github.com/sushi30/sushiclaw/pkg/tools/websearch"
 )
 
 // NewChatTools returns tools available to the local terminal chat.
@@ -12,6 +13,11 @@ func NewChatTools(cfg *config.Config) []interfaces.Tool {
 	out := newFileTools(cfg)
 	if cfg.Tools.IsToolEnabled("exec") {
 		out = append(out, exec.NewExecTool(workspacePath(cfg), restrictToWorkspace(cfg), true))
+	}
+	if cfg.Tools.IsToolEnabled("web_search") {
+		if tool, err := websearch.NewTool(cfg.Tools.WebSearch); err == nil {
+			out = append(out, tool)
+		}
 	}
 	return out
 }

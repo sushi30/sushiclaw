@@ -65,16 +65,29 @@
     "log_level": "info"
   },
   "tools": {
-    "web": {
+    "web_search": {
       "enabled": true,
-      "duckduckgo": {
+      "provider": "brave",
+      "max_results": 10,
+      "brave": {
         "enabled": true,
-        "max_results": 5
+        "api_key": "env://BRAVE_API_KEY"
+      },
+      "duckduckgo": {
+        "enabled": false
+      },
+      "browserbase": {
+        "enabled": false,
+        "api_key": "env://BROWSERBASE_API_KEY"
+      },
+      "tavily": {
+        "enabled": false,
+        "api_key": "env://TAVILY_API_KEY"
+      },
+      "baidu": {
+        "enabled": false,
+        "api_key": "env://BAIDU_API_KEY"
       }
-    },
-    "cron": {
-      "enabled": true,
-      "exec_timeout_minutes": 5
     },
     "media_cleanup": {
       "enabled": true,

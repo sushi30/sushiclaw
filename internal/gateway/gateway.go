@@ -67,6 +67,7 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 	cmdFilter := commandfilter.NewCommandFilter()
 
 	reg := commands.NewRegistry(commands.BuiltinDefinitions())
+	dm := NewDebugManager(messageBus)
 	rt := &commands.Runtime{
 		ListDefinitions: reg.Definitions,
 	}
@@ -137,6 +138,7 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	rt.ToggleDebug = dm.Toggle
 	if sessionMgr != nil {
 		rt.ClearHistory = sessionMgr.ClearHistory
 		rt.GetModelInfo = sessionMgr.GetModelInfo
@@ -246,4 +248,3 @@ func GetConfigPath() string {
 	}
 	return filepath.Join(GetHome(), "config.json")
 }
-

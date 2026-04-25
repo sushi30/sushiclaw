@@ -104,6 +104,67 @@ func TestExecuteClearCallsCallback(t *testing.T) {
 	assert.Contains(t, replied, "cleared")
 }
 
+func TestExecuteModel(t *testing.T) {
+	reg := commands.NewRegistry(commands.BuiltinDefinitions())
+	rt := &commands.Runtime{
+		GetModelInfo: func() (name, provider string) { return "gpt-4", "openai" },
+	}
+	exec := commands.NewExecutor(reg, rt)
+
+	var replied string
+	result := exec.Execute(context.Background(), commands.Request{
+		Text:  "/model",
+		Reply: func(s string) error { replied = s; return nil },
+	})
+	assert.Equal(t, commands.OutcomeHandled, result.Outcome)
+	assert.Contains(t, replied, "gpt-4")
+	assert.Contains(t, replied, "openai")
+}
+
+func TestExecuteModelNoRuntime(t *testing.T) {
+	reg := commands.NewRegistry(commands.BuiltinDefinitions())
+	exec := commands.NewExecutor(reg, &commands.Runtime{})
+
+	var replied string
+	result := exec.Execute(context.Background(), commands.Request{
+		Text:  "/model",
+		Reply: func(s string) error { replied = s; return nil },
+	})
+	assert.Equal(t, commands.OutcomeHandled, result.Outcome)
+	assert.Contains(t, replied, "unavailable")
+}
+
+func TestExecuteDebug(t *testing.T) {
+	toggled := false
+	reg := commands.NewRegistry(commands.BuiltinDefinitions())
+	rt := &commands.Runtime{
+		ToggleDebug: func(_ context.Context, _, _ string) string { toggled = true; return "Debug toggled." },
+	}
+	exec := commands.NewExecutor(reg, rt)
+
+	var replied string
+	result := exec.Execute(context.Background(), commands.Request{
+		Text:  "/debug",
+		Reply: func(s string) error { replied = s; return nil },
+	})
+	assert.Equal(t, commands.OutcomeHandled, result.Outcome)
+	assert.True(t, toggled)
+	assert.Equal(t, "Debug toggled.", replied)
+}
+
+func TestExecuteDebugNoRuntime(t *testing.T) {
+	reg := commands.NewRegistry(commands.BuiltinDefinitions())
+	exec := commands.NewExecutor(reg, &commands.Runtime{})
+
+	var replied string
+	result := exec.Execute(context.Background(), commands.Request{
+		Text:  "/debug",
+		Reply: func(s string) error { replied = s; return nil },
+	})
+	assert.Equal(t, commands.OutcomeHandled, result.Outcome)
+	assert.Contains(t, replied, "unavailable")
+}
+
 func TestExecutePassthroughNoHandler(t *testing.T) {
 	reg := commands.NewRegistry(commands.BuiltinDefinitions())
 	exec := commands.NewExecutor(reg, &commands.Runtime{})

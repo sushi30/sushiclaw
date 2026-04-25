@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Ingenimax/agent-sdk-go/pkg/interfaces"
 	"github.com/sushi30/sushiclaw/internal/agent"
 	"github.com/sushi30/sushiclaw/internal/commandfilter"
 	"github.com/sushi30/sushiclaw/internal/envresolve"
@@ -70,28 +71,29 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 		ListDefinitions: reg.Definitions,
 	}
 
-	sessionMgr, err := agent.NewSessionManager(cfg, messageBus)
-	if err != nil {
-		if allowEmptyStartup {
-			logger.WarnC("gateway", fmt.Sprintf("Failed to create agent session: %v", err))
-		} else {
-			return fmt.Errorf("error creating agent session: %w", err)
-		}
-	}
-
+	var tools []interfaces.Tool
 	if allowedSenders := sushitools.ParseAllowedSenders(); len(allowedSenders) > 0 {
 		if cfg.Tools.IsToolEnabled("exec") {
-			workingDir := cfg.Agents.Defaults.Workspace
+			workingDir := cfg.WorkspacePath()
 			restrict := cfg.Agents.Defaults.RestrictToWorkspace
 			trustedExec, err := sushitools.NewTrustedExecTool(cfg, workingDir, restrict, allowedSenders)
 			if err != nil {
 				logger.WarnCF("gateway", "Failed to init trusted exec tool",
 					map[string]any{"error": err.Error()})
 			} else {
-				sessionMgr.RegisterTool(trustedExec)
+				tools = append(tools, trustedExec)
 				logger.InfoCF("gateway", "Trusted exec registered",
 					map[string]any{"senders": allowedSenders})
 			}
+		}
+	}
+
+	sessionMgr, err := agent.NewSessionManager(cfg, messageBus, tools)
+	if err != nil {
+		if allowEmptyStartup {
+			logger.WarnC("gateway", fmt.Sprintf("Failed to create agent session: %v", err))
+		} else {
+			return fmt.Errorf("error creating agent session: %w", err)
 		}
 	}
 

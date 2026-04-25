@@ -2,6 +2,7 @@ package exec
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -61,14 +62,7 @@ func (e *ExecTool) Run(ctx context.Context, input string) (string, error) {
 
 // Execute executes the tool with the given arguments JSON string.
 func (e *ExecTool) Execute(ctx context.Context, args string) (string, error) {
-	// Simple parsing: if args looks like a JSON object with "command", extract it.
-	cmdStr := strings.Trim(args, `{} `)
-	if strings.HasPrefix(cmdStr, `"command":`) {
-		parts := strings.SplitN(cmdStr, `"command":`, 2)
-		if len(parts) == 2 {
-			cmdStr = strings.Trim(parts[1], ` "{},`)
-		}
-	}
+	cmdStr := parseCommand(args)
 	if cmdStr == "" {
 		return "", fmt.Errorf("no command provided")
 	}
@@ -101,6 +95,27 @@ func (e *ExecTool) Execute(ctx context.Context, args string) (string, error) {
 		return string(out), fmt.Errorf("exec error: %w", err)
 	}
 	return string(out), nil
+}
+
+func parseCommand(args string) string {
+	args = strings.TrimSpace(args)
+	if args == "" {
+		return ""
+	}
+
+	var payload struct {
+		Command string `json:"command"`
+	}
+	if err := json.Unmarshal([]byte(args), &payload); err == nil && payload.Command != "" {
+		return strings.TrimSpace(payload.Command)
+	}
+
+	var raw string
+	if err := json.Unmarshal([]byte(args), &raw); err == nil {
+		return strings.TrimSpace(raw)
+	}
+
+	return args
 }
 
 func isLocalChat(chatID string) bool {

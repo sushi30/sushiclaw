@@ -24,6 +24,22 @@ type Config struct {
 	EmailChannel *EmailChanCfg  `json:"email_channel,omitempty"`
 	Gateway      GatewayConfig  `json:"gateway"`
 	Tools        ToolsConfig    `json:"tools"`
+	MCP          MCPConfig      `json:"mcp,omitempty"`
+}
+
+// MCPConfig holds MCP server configuration.
+type MCPConfig struct {
+	MCPServers map[string]MCPServerConfig `json:"mcpServers"`
+}
+
+// MCPServerConfig represents a single MCP server configuration.
+type MCPServerConfig struct {
+	Command      string            `json:"command,omitempty"`
+	Args         []string          `json:"args,omitempty"`
+	Env          map[string]string `json:"env,omitempty"`
+	URL          string            `json:"url,omitempty"`
+	Token        *SecureString     `json:"token,omitzero"`
+	AllowedTools []string          `json:"allowedTools,omitempty"`
 }
 
 type AgentsConfig struct {

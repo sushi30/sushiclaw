@@ -53,11 +53,18 @@ type Request struct {
 	Reply    func(text string) error
 }
 
+// SkillInfo describes a skill available in the configured workspace.
+type SkillInfo struct {
+	Name        string
+	Description string
+}
+
 // Runtime provides runtime dependencies to command handlers.
 type Runtime struct {
 	GetModelInfo    func() (name, provider string)
 	ListDefinitions func() []Definition
 	ListModels      func() []string
+	ListSkills      func() []SkillInfo
 	ClearHistory    func() error
 	ToggleDebug     func(ctx context.Context, channel, chatID string) string
 	ActivateSkill   func(skillName string) error
@@ -254,6 +261,7 @@ func BuiltinDefinitions() []Definition {
 		{Name: "show", Description: "Show current configuration"},
 		{Name: "list", Description: "List available options", SubCommands: []SubCommand{
 			{Name: "models", Description: "List configured models", Handler: listModelsHandler},
+			{Name: "skills", Description: "List available skills", Handler: listSkillsHandler},
 		}},
 		{Name: "use", Description: "Use a specific skill", Handler: useHandler, Usage: "/use <skill-name>"},
 		{Name: "btw", Description: "Add a note to conversation context"},
@@ -306,6 +314,26 @@ func listModelsHandler(_ context.Context, req Request, rt *Runtime) error {
 	sb.WriteString("Configured models:\n")
 	for _, m := range models {
 		sb.WriteString("• " + m + "\n")
+	}
+	return req.Reply(strings.TrimRight(sb.String(), "\n"))
+}
+
+func listSkillsHandler(_ context.Context, req Request, rt *Runtime) error {
+	if rt == nil || rt.ListSkills == nil {
+		return req.Reply("Skill list unavailable.")
+	}
+	skills := rt.ListSkills()
+	if len(skills) == 0 {
+		return req.Reply("No skills available.")
+	}
+	var sb strings.Builder
+	sb.WriteString("Available skills:\n")
+	for _, s := range skills {
+		sb.WriteString("• " + s.Name)
+		if s.Description != "" {
+			sb.WriteString(" — " + s.Description)
+		}
+		sb.WriteByte('\n')
 	}
 	return req.Reply(strings.TrimRight(sb.String(), "\n"))
 }

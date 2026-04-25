@@ -191,6 +191,15 @@ func (sm *SessionManager) ListModels() []string {
 	return names
 }
 
+// ListSkills returns all skills available in the configured workspace.
+func (sm *SessionManager) ListSkills() []commands.SkillInfo {
+	ws := sm.cfg.WorkspacePath()
+	if ws == "" {
+		return nil
+	}
+	return listSkillsInDir(filepath.Join(ws, "skills"))
+}
+
 // GetModelInfo returns the configured model name and its provider.
 func (sm *SessionManager) GetModelInfo() (name, provider string) {
 	name = sm.cfg.Agents.Defaults.ModelName

@@ -367,3 +367,59 @@ func TestSessionManager_ActivateSkill_NotFound(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }
+
+func TestSessionManager_ListSkills(t *testing.T) {
+	ws := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(ws, "skills", "python"), 0755))
+	require.NoError(t, os.MkdirAll(filepath.Join(ws, "skills", "review"), 0755))
+	require.NoError(t, os.MkdirAll(filepath.Join(ws, "skills", "missing-file"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(ws, "skills", "ignored.txt"), []byte("not a skill"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(ws, "skills", "python", "SKILL.md"), []byte("---\nname: python\ndescription: Python coding help\n---\n\n# Python\n\nBody fallback."), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(ws, "skills", "review", "SKILL.md"), []byte("# Review\n\n- Review code carefully."), 0644))
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{ModelName: "test-model"},
+		},
+		ModelList: []config.ModelConfig{
+			{
+				ModelName: "test-model",
+				Model:     "gpt-4o",
+				APIKey:    config.NewSecureString("test-key"),
+			},
+		},
+	}
+	cfg.Agents.Defaults.Workspace = ws
+
+	sm, err := agent.NewSessionManager(cfg, nil, nil)
+	require.NoError(t, err)
+
+	skills := sm.ListSkills()
+	require.Len(t, skills, 2)
+	assert.Equal(t, "python", skills[0].Name)
+	assert.Equal(t, "Python coding help", skills[0].Description)
+	assert.Equal(t, "review", skills[1].Name)
+	assert.Equal(t, "Review code carefully.", skills[1].Description)
+}
+
+func TestSessionManager_ListSkillsMissingDirectory(t *testing.T) {
+	ws := t.TempDir()
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{ModelName: "test-model"},
+		},
+		ModelList: []config.ModelConfig{
+			{
+				ModelName: "test-model",
+				Model:     "gpt-4o",
+				APIKey:    config.NewSecureString("test-key"),
+			},
+		},
+	}
+	cfg.Agents.Defaults.Workspace = ws
+
+	sm, err := agent.NewSessionManager(cfg, nil, nil)
+	require.NoError(t, err)
+
+	assert.Empty(t, sm.ListSkills())
+}

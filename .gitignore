@@ -21,6 +21,10 @@ go.work.sum
 
 # Config with secrets (use config.example.json as template)
 ~/.picoclaw/config.json
+.env
+
+# Local agent artifacts
+.codex
 
 # Editor
 .idea/

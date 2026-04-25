@@ -90,6 +90,11 @@
         "api_key": "env://BAIDU_API_KEY"
       }
     },
+    "cron": {
+      "enabled": true,
+      "allow_command": true,
+      "exec_timeout_minutes": 5
+    },
     "media_cleanup": {
       "enabled": true,
       "max_age": 30,

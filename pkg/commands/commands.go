@@ -54,11 +54,12 @@ type Request struct {
 
 // Runtime provides runtime dependencies to command handlers.
 type Runtime struct {
-	GetModelInfo    func() (name, provider string)
-	ListDefinitions func() []Definition
-	ListModels      func() []string
-	ClearHistory    func() error
-	ToggleDebug     func(ctx context.Context, channel, chatID string) string
+	GetModelInfo      func() (name, provider string)
+	ListDefinitions   func() []Definition
+	ListModels        func() []string
+	ClearHistory      func() error
+	ClearSecureInputs func(chatID string)
+	ToggleDebug       func(ctx context.Context, channel, chatID string) string
 }
 
 // Registry stores command definitions indexed by name and alias.
@@ -313,6 +314,9 @@ func clearHandler(_ context.Context, req Request, rt *Runtime) error {
 		if err := rt.ClearHistory(); err != nil {
 			return req.Reply("Failed to clear history: " + err.Error())
 		}
+	}
+	if rt != nil && rt.ClearSecureInputs != nil {
+		rt.ClearSecureInputs(req.ChatID)
 	}
 	return req.Reply("History cleared.")
 }

@@ -101,6 +101,7 @@ func (r *Runner) handleCommand(ctx context.Context, line string) (bool, error) {
 		_, _ = fmt.Fprintln(r.out, "Goodbye!")
 		return true, ErrQuit
 	case "/clear":
+		sushitools.ClearSecureInputs("cli")
 		// In-memory memory is per-agent-instance, so "clear" just means
 		// we can't easily clear it without access to the memory interface.
 		// For now, tell the user.

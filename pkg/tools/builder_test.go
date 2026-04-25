@@ -22,6 +22,18 @@ func TestNewChatTools_RegistersEnabledTools(t *testing.T) {
 	}
 }
 
+func TestNewChatTools_RegistersSecureInputWhenEnabled(t *testing.T) {
+	cfg := newToolsConfig(t)
+	cfg.Tools.SecureInput.Enabled = true
+	cfg.Tools.ReadFile.Enabled = true
+
+	got := toolNames(tools.NewChatTools(cfg))
+	want := []string{"secure_input", "read_file"}
+	if !equalStrings(got, want) {
+		t.Fatalf("tool names = %v, want %v", got, want)
+	}
+}
+
 func TestNewGatewayTools_RegistersFileToolsWithoutExecAllowlist(t *testing.T) {
 	cfg := newToolsConfig(t)
 	cfg.Tools.Exec.Enabled = true
@@ -35,6 +47,23 @@ func TestNewGatewayTools_RegistersFileToolsWithoutExecAllowlist(t *testing.T) {
 
 	got := toolNames(built)
 	want := []string{"read_file", "list_dir"}
+	if !equalStrings(got, want) {
+		t.Fatalf("tool names = %v, want %v", got, want)
+	}
+}
+
+func TestNewGatewayTools_RegistersSecureInputWhenEnabled(t *testing.T) {
+	cfg := newToolsConfig(t)
+	cfg.Tools.SecureInput.Enabled = true
+	cfg.Tools.ListDir.Enabled = true
+
+	built, err := tools.NewGatewayTools(cfg, nil)
+	if err != nil {
+		t.Fatalf("NewGatewayTools: %v", err)
+	}
+
+	got := toolNames(built)
+	want := []string{"secure_input", "list_dir"}
 	if !equalStrings(got, want) {
 		t.Fatalf("tool names = %v, want %v", got, want)
 	}

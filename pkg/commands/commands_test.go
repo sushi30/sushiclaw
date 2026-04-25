@@ -88,19 +88,23 @@ func TestExecuteStart(t *testing.T) {
 
 func TestExecuteClearCallsCallback(t *testing.T) {
 	cleared := false
+	clearedSecureChat := ""
 	reg := commands.NewRegistry(commands.BuiltinDefinitions())
 	rt := &commands.Runtime{
-		ClearHistory: func() error { cleared = true; return nil },
+		ClearHistory:      func() error { cleared = true; return nil },
+		ClearSecureInputs: func(chatID string) { clearedSecureChat = chatID },
 	}
 	exec := commands.NewExecutor(reg, rt)
 
 	var replied string
 	result := exec.Execute(context.Background(), commands.Request{
-		Text:  "/clear",
-		Reply: func(s string) error { replied = s; return nil },
+		ChatID: "chat-1",
+		Text:   "/clear",
+		Reply:  func(s string) error { replied = s; return nil },
 	})
 	assert.Equal(t, commands.OutcomeHandled, result.Outcome)
 	assert.True(t, cleared)
+	assert.Equal(t, "chat-1", clearedSecureChat)
 	assert.Contains(t, replied, "cleared")
 }
 

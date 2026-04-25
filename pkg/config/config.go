@@ -88,6 +88,7 @@ type ToolsConfig struct {
 	ReadFile     ToolConfig      `json:"read_file"`
 	WriteFile    ToolConfig      `json:"write_file"`
 	ListDir      ToolConfig      `json:"list_dir"`
+	SecureInput  ToolConfig      `json:"secure_input"`
 }
 
 func (t ToolsConfig) IsToolEnabled(name string) bool {
@@ -100,6 +101,8 @@ func (t ToolsConfig) IsToolEnabled(name string) bool {
 		return t.WriteFile.Enabled
 	case "list_dir":
 		return t.ListDir.Enabled
+	case "secure_input":
+		return t.SecureInput.Enabled
 	}
 	return false
 }

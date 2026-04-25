@@ -242,7 +242,7 @@ func TestNewSessionManager_ToolsRegistered(t *testing.T) {
 	}
 
 	tool := &mockTool{name: "test-tool"}
-	sm, err := agent.NewSessionManager(cfg, nil, []interfaces.Tool{tool})
+	sm, err := agent.NewSessionManager(cfg, nil, []interfaces.Tool{tool}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"test-tool"}, sm.ToolNames())
 }
@@ -299,7 +299,7 @@ func TestSessionManager_ActivateSkill(t *testing.T) {
 	}
 	cfg.Agents.Defaults.Workspace = ws
 
-	sm, err := agent.NewSessionManager(cfg, nil, nil)
+	sm, err := agent.NewSessionManager(cfg, nil, nil, nil)
 	require.NoError(t, err)
 
 	// First activation should succeed.
@@ -334,7 +334,7 @@ func TestSessionManager_ActivateSkill_AlreadyLoaded(t *testing.T) {
 	}
 	cfg.Agents.Defaults.Workspace = ws
 
-	sm, err := agent.NewSessionManager(cfg, nil, nil)
+	sm, err := agent.NewSessionManager(cfg, nil, nil, nil)
 	require.NoError(t, err)
 
 	require.NoError(t, sm.ActivateSkill("python"))
@@ -360,7 +360,7 @@ func TestSessionManager_ActivateSkill_NotFound(t *testing.T) {
 	}
 	cfg.Agents.Defaults.Workspace = ws
 
-	sm, err := agent.NewSessionManager(cfg, nil, nil)
+	sm, err := agent.NewSessionManager(cfg, nil, nil, nil)
 	require.NoError(t, err)
 
 	err = sm.ActivateSkill("nonexistent")
@@ -391,7 +391,7 @@ func TestSessionManager_ListSkills(t *testing.T) {
 	}
 	cfg.Agents.Defaults.Workspace = ws
 
-	sm, err := agent.NewSessionManager(cfg, nil, nil)
+	sm, err := agent.NewSessionManager(cfg, nil, nil, nil)
 	require.NoError(t, err)
 
 	skills := sm.ListSkills()
@@ -418,7 +418,7 @@ func TestSessionManager_ListSkillsMissingDirectory(t *testing.T) {
 	}
 	cfg.Agents.Defaults.Workspace = ws
 
-	sm, err := agent.NewSessionManager(cfg, nil, nil)
+	sm, err := agent.NewSessionManager(cfg, nil, nil, nil)
 	require.NoError(t, err)
 
 	assert.Empty(t, sm.ListSkills())

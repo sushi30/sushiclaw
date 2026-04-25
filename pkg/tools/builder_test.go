@@ -28,7 +28,7 @@ func TestNewGatewayTools_RegistersFileToolsWithoutExecAllowlist(t *testing.T) {
 	cfg.Tools.ReadFile.Enabled = true
 	cfg.Tools.ListDir.Enabled = true
 
-	built, err := tools.NewGatewayTools(cfg, nil)
+	built, err := tools.NewGatewayTools(cfg, nil, nil)
 	if err != nil {
 		t.Fatalf("NewGatewayTools: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestNewGatewayTools_RegistersTrustedExecWithAllowlist(t *testing.T) {
 	cfg := newToolsConfig(t)
 	cfg.Tools.Exec.Enabled = true
 
-	built, err := tools.NewGatewayTools(cfg, []string{"chat-1"})
+	built, err := tools.NewGatewayTools(cfg, []string{"chat-1"}, nil)
 	if err != nil {
 		t.Fatalf("NewGatewayTools: %v", err)
 	}

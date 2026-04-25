@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"github.com/sushi30/sushiclaw/pkg/bus"
 	"github.com/sushi30/sushiclaw/pkg/channels"
 	"github.com/sushi30/sushiclaw/pkg/config"
+	"github.com/sushi30/sushiclaw/pkg/media"
 )
 
 func TestGenerateMessageID(t *testing.T) {
@@ -710,6 +712,254 @@ func extractSubjectFromSMTPBody(t *testing.T, body string) string {
 	}
 	t.Fatalf("no Subject header found in SMTP body:\n%s", body)
 	return ""
+}
+
+func TestExtractAttachments(t *testing.T) {
+	mimeWithAttachments := strings.Join([]string{
+		"MIME-Version: 1.0",
+		`Content-Type: multipart/mixed; boundary="boundary"`,
+		"",
+		"--boundary",
+		"Content-Type: text/plain; charset=utf-8",
+		"",
+		"Hello with attachment",
+		"--boundary",
+		"Content-Type: application/octet-stream",
+		`Content-Disposition: attachment; filename="test.txt"`,
+		"",
+		"attachment data",
+		"--boundary",
+		"Content-Type: image/png",
+		`Content-Disposition: attachment; filename="image.png"`,
+		"",
+		"pngdata",
+		"--boundary--",
+	}, "\r\n")
+
+	attachments := extractAttachments(strings.NewReader(mimeWithAttachments))
+	if len(attachments) != 2 {
+		t.Fatalf("expected 2 attachments, got %d", len(attachments))
+	}
+	if attachments[0].filename != "test.txt" {
+		t.Errorf("attachment[0].filename = %q, want %q", attachments[0].filename, "test.txt")
+	}
+	if string(attachments[0].data) != "attachment data" {
+		t.Errorf("attachment[0].data = %q, want %q", attachments[0].data, "attachment data")
+	}
+	if attachments[1].filename != "image.png" {
+		t.Errorf("attachment[1].filename = %q, want %q", attachments[1].filename, "image.png")
+	}
+	if string(attachments[1].data) != "pngdata" {
+		t.Errorf("attachment[1].data = %q, want %q", attachments[1].data, "pngdata")
+	}
+}
+
+func TestExtractAttachments_NoAttachments(t *testing.T) {
+	plainMIME := "MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nHello"
+	attachments := extractAttachments(strings.NewReader(plainMIME))
+	if len(attachments) != 0 {
+		t.Errorf("expected 0 attachments, got %d", len(attachments))
+	}
+}
+
+func TestProcessEmail_WithAttachments(t *testing.T) {
+	messageBus := bus.NewMessageBus()
+	store := media.NewFileMediaStore()
+	ch := &EmailChannel{
+		BaseChannel: channels.NewBaseChannel("email", EmailConfig{}, messageBus, nil),
+		tm:          NewThreadManager(),
+	}
+	ch.SetMediaStore(store)
+
+	mimeWithAttachment := strings.Join([]string{
+		"MIME-Version: 1.0",
+		`Content-Type: multipart/mixed; boundary="boundary"`,
+		"",
+		"--boundary",
+		"Content-Type: text/plain; charset=utf-8",
+		"",
+		"See attached",
+		"--boundary",
+		"Content-Type: text/plain",
+		`Content-Disposition: attachment; filename="notes.txt"`,
+		"",
+		"note content",
+		"--boundary--",
+	}, "\r\n")
+
+	envelope := &imap.Envelope{
+		From:      []imap.Address{{Mailbox: "test", Host: "example.com", Name: "Test Sender"}},
+		Subject:   "With attachment",
+		MessageID: "mid-attachment",
+	}
+
+	processed, got := ch.processEmail(context.Background(), envelope, strings.NewReader(mimeWithAttachment))
+	if !processed {
+		t.Fatal("processEmail() reported skipped message")
+	}
+	if got != "See attached" {
+		t.Fatalf("processEmail() = %q, want %q", got, "See attached")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	select {
+	case <-ctx.Done():
+		t.Fatal("timeout waiting for inbound message")
+	case inbound, ok := <-messageBus.InboundChan():
+		if !ok {
+			t.Fatal("expected inbound message")
+		}
+		if inbound.Channel != "email" {
+			t.Fatalf("channel=%q", inbound.Channel)
+		}
+		if inbound.Content != "See attached" {
+			t.Fatalf("content=%q", inbound.Content)
+		}
+		if len(inbound.Media) != 1 {
+			t.Fatalf("expected 1 media ref, got %d", len(inbound.Media))
+		}
+		if !strings.HasPrefix(inbound.Media[0], "media://") {
+			t.Errorf("media ref = %q, want media:// prefix", inbound.Media[0])
+		}
+	}
+}
+
+func TestProcessEmail_MediaOnly(t *testing.T) {
+	messageBus := bus.NewMessageBus()
+	store := media.NewFileMediaStore()
+	ch := &EmailChannel{
+		BaseChannel: channels.NewBaseChannel("email", EmailConfig{}, messageBus, nil),
+		tm:          NewThreadManager(),
+	}
+	ch.SetMediaStore(store)
+
+	mimeOnlyAttachment := strings.Join([]string{
+		"MIME-Version: 1.0",
+		`Content-Type: multipart/mixed; boundary="boundary"`,
+		"",
+		"--boundary",
+		"Content-Type: application/pdf",
+		`Content-Disposition: attachment; filename="doc.pdf"`,
+		"",
+		"pdfdata",
+		"--boundary--",
+	}, "\r\n")
+
+	envelope := &imap.Envelope{
+		From:      []imap.Address{{Mailbox: "test", Host: "example.com"}},
+		Subject:   "PDF only",
+		MessageID: "mid-pdf",
+	}
+
+	processed, got := ch.processEmail(context.Background(), envelope, strings.NewReader(mimeOnlyAttachment))
+	if !processed {
+		t.Fatal("processEmail() reported skipped message")
+	}
+	if got != "" {
+		t.Fatalf("processEmail() text = %q, want empty", got)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	select {
+	case <-ctx.Done():
+		t.Fatal("timeout waiting for inbound message")
+	case inbound, ok := <-messageBus.InboundChan():
+		if !ok {
+			t.Fatal("expected inbound message")
+		}
+		if inbound.Content != "" {
+			t.Fatalf("content=%q, want empty", inbound.Content)
+		}
+		if len(inbound.Media) != 1 {
+			t.Fatalf("expected 1 media ref, got %d", len(inbound.Media))
+		}
+	}
+}
+
+func TestSendMedia_WithAttachment(t *testing.T) {
+	smtpHost, smtpPort, received := startSMTPCapture(t)
+	smtpPortInt, _ := strconv.Atoi(smtpPort)
+
+	cfg := EmailConfig{
+		SMTPHost:       smtpHost,
+		SMTPPort:       smtpPortInt,
+		SMTPFrom:       *config.NewSecureString("bot@test.com"),
+		DefaultSubject: "Message",
+		IMAPHost:       "127.0.0.1",
+		IMAPPort:       10143,
+		IMAPUser:       *config.NewSecureString("u"),
+		IMAPPassword:   *config.NewSecureString("p"),
+	}
+
+	ch, err := NewEmailChannel(cfg, bus.NewMessageBus())
+	if err != nil {
+		t.Fatalf("NewEmailChannel: %v", err)
+	}
+	ch.SetRunning(true)
+
+	// Seed the thread manager so the reply gets a Re: subject.
+	ch.tm.ProcessHeaders("orig-attach@test.com", "Original Subject", "", "")
+
+	// Create a temp file and store it.
+	store := media.NewFileMediaStore()
+	ch.SetMediaStore(store)
+
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "report.txt")
+	if err := os.WriteFile(tmpFile, []byte("report content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ref, err := store.Store(tmpFile, media.MediaMeta{
+		Filename:    "report.txt",
+		ContentType: "text/plain",
+		Source:      "test",
+	}, "test:scope")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = ch.SendMedia(context.Background(), bus.OutboundMediaMessage{
+		ChatID: "user@example.com",
+		Parts: []bus.MediaPart{
+			{
+				Type:        "file",
+				Ref:         ref,
+				Filename:    "report.txt",
+				ContentType: "text/plain",
+				Caption:     "Please find the report attached.",
+			},
+		},
+		Context: bus.InboundContext{ReplyToMessageID: "orig-attach@test.com"},
+	})
+	if err != nil {
+		t.Fatalf("SendMedia: %v", err)
+	}
+
+	select {
+	case body := <-received:
+		if !strings.Contains(body, "Subject: Re: Original Subject") {
+			t.Errorf("missing Re: subject in:\n%s", body)
+		}
+		if !strings.Contains(body, "Content-Disposition: attachment") {
+			t.Errorf("missing attachment disposition in:\n%s", body)
+		}
+		if !strings.Contains(body, "filename=report.txt") {
+			t.Errorf("missing attachment filename in:\n%s", body)
+		}
+		// Content is base64-encoded by gomail
+		if !strings.Contains(body, "cmVwb3J0IGNvbnRlbnQ=") {
+			t.Errorf("missing base64 attachment content in:\n%s", body)
+		}
+		if !strings.Contains(body, "Please find the report attached.") {
+			t.Errorf("missing caption/body in:\n%s", body)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout: SMTP capture received nothing")
+	}
 }
 
 func TestProcessEmail_SkipsEmptyOrSenderlessMessages(t *testing.T) {

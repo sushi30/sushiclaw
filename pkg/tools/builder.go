@@ -3,8 +3,10 @@ package tools
 import (
 	"github.com/Ingenimax/agent-sdk-go/pkg/interfaces"
 	"github.com/sushi30/sushiclaw/pkg/config"
+	"github.com/sushi30/sushiclaw/pkg/media"
 	"github.com/sushi30/sushiclaw/pkg/tools/exec"
 	fstools "github.com/sushi30/sushiclaw/pkg/tools/fs"
+	"github.com/sushi30/sushiclaw/pkg/tools/vision"
 	"github.com/sushi30/sushiclaw/pkg/tools/websearch"
 )
 
@@ -19,11 +21,16 @@ func NewChatTools(cfg *config.Config) []interfaces.Tool {
 			out = append(out, tool)
 		}
 	}
+	if cfg.Tools.IsToolEnabled("vision") {
+		if tool, err := vision.NewTool(cfg.Tools.Vision, defaultModel(cfg), nil); err == nil {
+			out = append(out, tool)
+		}
+	}
 	return out
 }
 
 // NewGatewayTools returns tools available to remote gateway sessions.
-func NewGatewayTools(cfg *config.Config, execAllowedSenders []string) ([]interfaces.Tool, error) {
+func NewGatewayTools(cfg *config.Config, execAllowedSenders []string, store media.MediaStore) ([]interfaces.Tool, error) {
 	out := newFileTools(cfg)
 	if cfg.Tools.IsToolEnabled("exec") && len(execAllowedSenders) > 0 {
 		trustedExec, err := NewTrustedExecTool(cfg, workspacePath(cfg), restrictToWorkspace(cfg), execAllowedSenders)
@@ -31,6 +38,11 @@ func NewGatewayTools(cfg *config.Config, execAllowedSenders []string) ([]interfa
 			return out, err
 		}
 		out = append(out, trustedExec)
+	}
+	if cfg.Tools.IsToolEnabled("vision") {
+		if tool, err := vision.NewTool(cfg.Tools.Vision, defaultModel(cfg), store); err == nil {
+			out = append(out, tool)
+		}
 	}
 	return out, nil
 }
@@ -61,4 +73,17 @@ func workspacePath(cfg *config.Config) string {
 
 func restrictToWorkspace(cfg *config.Config) bool {
 	return cfg != nil && cfg.Agents.Defaults.RestrictToWorkspace
+}
+
+func defaultModel(cfg *config.Config) *config.ModelConfig {
+	if cfg == nil {
+		return nil
+	}
+	name := cfg.Agents.Defaults.ModelName
+	for i := range cfg.ModelList {
+		if cfg.ModelList[i].ModelName == name {
+			return &cfg.ModelList[i]
+		}
+	}
+	return nil
 }

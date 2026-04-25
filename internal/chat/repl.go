@@ -10,10 +10,10 @@ import (
 	"os"
 
 	agentsdk "github.com/Ingenimax/agent-sdk-go/pkg/agent"
-	"github.com/Ingenimax/agent-sdk-go/pkg/interfaces"
 
 	"github.com/sushi30/sushiclaw/internal/agent"
 	"github.com/sushi30/sushiclaw/pkg/config"
+	sushitools "github.com/sushi30/sushiclaw/pkg/tools"
 	"github.com/sushi30/sushiclaw/pkg/tools/exec"
 )
 
@@ -29,12 +29,7 @@ type Runner struct {
 
 // NewRunner creates a chat runner from config.
 func NewRunner(cfg *config.Config) (*Runner, error) {
-	var tools []interfaces.Tool
-	if cfg.Tools.IsToolEnabled("exec") {
-		wd := cfg.WorkspacePath()
-		restrict := cfg.Agents.Defaults.RestrictToWorkspace
-		tools = append(tools, exec.NewExecTool(wd, restrict, true))
-	}
+	tools := sushitools.NewChatTools(cfg)
 
 	agentsdkAgent, err := agent.BuildAgent(cfg, tools)
 	if err != nil {

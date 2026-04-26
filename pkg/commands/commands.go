@@ -66,7 +66,7 @@ type Runtime struct {
 	ListModels      func() []string
 	ListSkills      func() []SkillInfo
 	ClearHistory    func() error
-	ToggleDebug     func(ctx context.Context, channel, chatID string) string
+	SetDebug        func(ctx context.Context, channel, chatID, mode string) string
 	ActivateSkill   func(skillName string) error
 }
 
@@ -256,7 +256,7 @@ func BuiltinDefinitions() []Definition {
 		{Name: "start", Description: "Start the bot", Handler: startHandler},
 		{Name: "help", Description: "Show this help message", Handler: helpHandler},
 		{Name: "clear", Description: "Clear conversation history", Handler: clearHandler},
-		{Name: "debug", Description: "Toggle debug event forwarding", Handler: debugHandler},
+		{Name: "debug", Description: "Toggle debug event forwarding", Handler: debugHandler, Usage: "/debug [on|off]"},
 		{Name: "model", Description: "Show or switch model", Handler: modelHandler},
 		{Name: "show", Description: "Show current configuration"},
 		{Name: "list", Description: "List available options", SubCommands: []SubCommand{
@@ -359,10 +359,21 @@ func modelHandler(_ context.Context, req Request, rt *Runtime) error {
 }
 
 func debugHandler(ctx context.Context, req Request, rt *Runtime) error {
-	if rt == nil || rt.ToggleDebug == nil {
+	if rt == nil || rt.SetDebug == nil {
 		return req.Reply("Debug toggle unavailable.")
 	}
-	reply := rt.ToggleDebug(ctx, req.Channel, req.ChatID)
+	mode := nthToken(req.Text, 1)
+	if mode == "" {
+		mode = "toggle"
+	}
+	mode = normalize(mode)
+	if mode != "toggle" && mode != "on" && mode != "off" {
+		return req.Reply("Usage: /debug [on|off]")
+	}
+	if nthToken(req.Text, 2) != "" {
+		return req.Reply("Usage: /debug [on|off]")
+	}
+	reply := rt.SetDebug(ctx, req.Channel, req.ChatID, mode)
 	return req.Reply(reply)
 }
 

@@ -67,7 +67,8 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 	cmdFilter := commandfilter.NewCommandFilter()
 
 	reg := commands.NewRegistry(commands.BuiltinDefinitions())
-	dm := NewDebugManager(messageBus)
+	heartbeat := time.Duration(cfg.Gateway.DebugHeartbeatSeconds) * time.Second
+	dm := NewDebugManager(messageBus, heartbeat)
 	rt := &commands.Runtime{
 		ListDefinitions: reg.Definitions,
 	}
@@ -95,7 +96,7 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 		}
 	}
 
-	sessionMgr, err := agent.NewSessionManager(cfg, messageBus, tools)
+	sessionMgr, err := agent.NewSessionManager(cfg, messageBus, tools, agent.WithProgressSink(dm))
 	if err != nil {
 		if allowEmptyStartup {
 			logger.WarnC("gateway", fmt.Sprintf("Failed to create agent session: %v", err))
@@ -144,7 +145,7 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	rt.ToggleDebug = dm.Toggle
+	rt.SetDebug = dm.Set
 	if sessionMgr != nil {
 		rt.ClearHistory = sessionMgr.ClearHistory
 		rt.GetModelInfo = sessionMgr.GetModelInfo

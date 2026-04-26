@@ -77,9 +77,10 @@ func (m *ModelConfig) APIKeyString() string {
 }
 
 type GatewayConfig struct {
-	Host     string `json:"host"`
-	Port     int    `json:"port"`
-	LogLevel string `json:"log_level"`
+	Host                  string `json:"host"`
+	Port                  int    `json:"port"`
+	LogLevel              string `json:"log_level"`
+	DebugHeartbeatSeconds int    `json:"debug_heartbeat_seconds,omitempty"`
 }
 
 type ToolsConfig struct {

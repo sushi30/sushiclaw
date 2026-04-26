@@ -135,10 +135,10 @@ func TestExecuteModelNoRuntime(t *testing.T) {
 }
 
 func TestExecuteDebug(t *testing.T) {
-	toggled := false
+	mode := ""
 	reg := commands.NewRegistry(commands.BuiltinDefinitions())
 	rt := &commands.Runtime{
-		ToggleDebug: func(_ context.Context, _, _ string) string { toggled = true; return "Debug toggled." },
+		SetDebug: func(_ context.Context, _, _, m string) string { mode = m; return "Debug toggled." },
 	}
 	exec := commands.NewExecutor(reg, rt)
 
@@ -148,8 +148,50 @@ func TestExecuteDebug(t *testing.T) {
 		Reply: func(s string) error { replied = s; return nil },
 	})
 	assert.Equal(t, commands.OutcomeHandled, result.Outcome)
-	assert.True(t, toggled)
+	assert.Equal(t, "toggle", mode)
 	assert.Equal(t, "Debug toggled.", replied)
+}
+
+func TestExecuteDebugOnOff(t *testing.T) {
+	reg := commands.NewRegistry(commands.BuiltinDefinitions())
+	var modes []string
+	rt := &commands.Runtime{
+		SetDebug: func(_ context.Context, _, _, mode string) string {
+			modes = append(modes, mode)
+			return "ok"
+		},
+	}
+	exec := commands.NewExecutor(reg, rt)
+
+	for _, text := range []string{"/debug on", "/debug off"} {
+		result := exec.Execute(context.Background(), commands.Request{
+			Text:  text,
+			Reply: func(string) error { return nil },
+		})
+		assert.Equal(t, commands.OutcomeHandled, result.Outcome)
+	}
+
+	assert.Equal(t, []string{"on", "off"}, modes)
+}
+
+func TestExecuteDebugInvalidArgs(t *testing.T) {
+	reg := commands.NewRegistry(commands.BuiltinDefinitions())
+	exec := commands.NewExecutor(reg, &commands.Runtime{
+		SetDebug: func(context.Context, string, string, string) string {
+			t.Fatal("SetDebug should not be called for invalid args")
+			return ""
+		},
+	})
+
+	for _, text := range []string{"/debug maybe", "/debug on extra"} {
+		var replied string
+		result := exec.Execute(context.Background(), commands.Request{
+			Text:  text,
+			Reply: func(s string) error { replied = s; return nil },
+		})
+		assert.Equal(t, commands.OutcomeHandled, result.Outcome)
+		assert.Equal(t, "Usage: /debug [on|off]", replied)
+	}
 }
 
 func TestExecuteDebugNoRuntime(t *testing.T) {

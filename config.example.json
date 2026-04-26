@@ -62,7 +62,8 @@
   "gateway": {
     "host": "0.0.0.0",
     "port": 18800,
-    "log_level": "info"
+    "log_level": "info",
+    "debug_heartbeat_seconds": 30
   },
   "tools": {
     "web_search": {

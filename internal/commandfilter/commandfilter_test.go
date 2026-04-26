@@ -54,6 +54,8 @@ func TestFilter_KnownCommandsWithArgs(t *testing.T) {
 		"/switch model gpt-4o",
 		"/check channel telegram",
 		"/use python",
+		"/debug on",
+		"/debug off",
 		"/clear",
 	}
 	for _, cmd := range cases {

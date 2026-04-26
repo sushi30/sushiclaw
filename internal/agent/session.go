@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	agentsdk "github.com/Ingenimax/agent-sdk-go/pkg/agent"
 	"github.com/Ingenimax/agent-sdk-go/pkg/interfaces"
@@ -23,12 +24,27 @@ import (
 
 // SessionManager wraps an agent-sdk-go Agent and processes inbound bus messages.
 type SessionManager struct {
-	agent           *agentsdk.Agent
+	agent           agentRunner
 	bus             *bus.MessageBus
 	mem             *InMemoryMemory
 	cfg             *config.Config
 	tools           []interfaces.Tool
 	activatedSkills map[string]bool
+	progress        ProgressSink
+}
+
+type agentRunner interface {
+	Run(ctx context.Context, input string) (string, error)
+	RunDetailed(ctx context.Context, input string) (*interfaces.AgentResponse, error)
+	RunStream(ctx context.Context, input string) (<-chan interfaces.AgentStreamEvent, error)
+}
+
+type SessionOption func(*SessionManager)
+
+func WithProgressSink(sink ProgressSink) SessionOption {
+	return func(sm *SessionManager) {
+		sm.progress = sink
+	}
 }
 
 // BuildAgent creates an agent-sdk-go Agent from config and tools.
@@ -124,21 +140,27 @@ func toAgentSDKMCPConfig(cfg config.MCPConfig) *agentsdk.MCPConfiguration {
 }
 
 // NewSessionManager creates a session manager from config.
-func NewSessionManager(cfg *config.Config, messageBus *bus.MessageBus, tools []interfaces.Tool) (*SessionManager, error) {
+func NewSessionManager(cfg *config.Config, messageBus *bus.MessageBus, tools []interfaces.Tool, opts ...SessionOption) (*SessionManager, error) {
 	mem := NewInMemoryMemory()
 	a, err := buildAgentWithMemory(cfg, tools, mem)
 	if err != nil {
 		return nil, err
 	}
 
-	return &SessionManager{
+	sm := &SessionManager{
 		agent:           a,
 		bus:             messageBus,
 		mem:             mem,
 		cfg:             cfg,
 		tools:           tools,
 		activatedSkills: make(map[string]bool),
-	}, nil
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(sm)
+		}
+	}
+	return sm, nil
 }
 
 // ClearHistory resets the agent's conversation memory.
@@ -268,13 +290,26 @@ func (sm *SessionManager) handleInbound(ctx context.Context, msg bus.InboundMess
 		"preview": truncate(input, 50),
 	})
 
-	response, err := sm.agent.Run(actx, input)
+	start := time.Now()
+	sm.emitProgress(ctx, ProgressEvent{Channel: msg.Channel, ChatID: chatID, Kind: ProgressTurnStarted})
+
+	response, usage, toolCalls, err := sm.runStreamingTurn(actx, ctx, msg.Channel, chatID, input, start)
 	if err != nil {
 		logger.ErrorCF("agent", "Agent run failed", map[string]any{"error": err.Error()})
 		_ = sm.bus.PublishOutbound(ctx, bus.OutboundMessage{
 			Channel: msg.Channel,
 			ChatID:  chatID,
 			Content: fmt.Sprintf("Error: %v", err),
+		})
+		sm.emitProgress(ctx, ProgressEvent{Channel: msg.Channel, ChatID: chatID, Kind: ProgressFailed, Error: err, Elapsed: time.Since(start)})
+		sm.emitSummary(ctx, ProgressSummary{
+			Channel:   msg.Channel,
+			ChatID:    chatID,
+			Success:   false,
+			ToolCalls: toolCalls,
+			Usage:     usage,
+			Duration:  time.Since(start),
+			Error:     err,
 		})
 		return
 	}
@@ -286,6 +321,240 @@ func (sm *SessionManager) handleInbound(ctx context.Context, msg bus.InboundMess
 			Content: response,
 		})
 	}
+	sm.emitProgress(ctx, ProgressEvent{Channel: msg.Channel, ChatID: chatID, Kind: ProgressCompleted, Elapsed: time.Since(start)})
+	sm.emitSummary(ctx, ProgressSummary{
+		Channel:   msg.Channel,
+		ChatID:    chatID,
+		Success:   true,
+		ToolCalls: toolCalls,
+		Usage:     usage,
+		Duration:  time.Since(start),
+	})
+}
+
+func (sm *SessionManager) runStreamingTurn(
+	actx context.Context,
+	outCtx context.Context,
+	channel string,
+	chatID string,
+	input string,
+	start time.Time,
+) (string, *interfaces.TokenUsage, int, error) {
+	events, err := sm.agent.RunStream(actx, input)
+	if err != nil {
+		sm.emitProgress(outCtx, ProgressEvent{Channel: channel, ChatID: chatID, Kind: ProgressFallback, Error: err, Elapsed: time.Since(start)})
+		return sm.runDetailedTurn(actx, input)
+	}
+	if events == nil {
+		err := errors.New("agent stream returned nil event channel")
+		sm.emitProgress(outCtx, ProgressEvent{Channel: channel, ChatID: chatID, Kind: ProgressFallback, Error: err, Elapsed: time.Since(start)})
+		return sm.runDetailedTurn(actx, input)
+	}
+
+	var streamer bus.Streamer
+	var hasStreamer bool
+	if sm.bus != nil {
+		streamer, hasStreamer = sm.bus.GetStreamer(outCtx, channel, chatID)
+	}
+
+	var sb strings.Builder
+	var usage *interfaces.TokenUsage
+	var toolCalls int
+	var streamErr error
+	firstActivity := false
+	lastActivity := time.Now()
+	heartbeatInterval := sm.heartbeatInterval()
+	heartbeat := time.NewTimer(heartbeatInterval)
+	defer heartbeat.Stop()
+
+	for {
+		select {
+		case event, ok := <-events:
+			if !ok {
+				if streamErr != nil && hasStreamer {
+					streamer.Cancel(outCtx)
+				}
+				return sb.String(), usage, toolCalls, streamErr
+			}
+			lastActivity = time.Now()
+			resetTimer(heartbeat, heartbeatInterval)
+			if u, ok := tokenUsageFromMetadata(event.Metadata); ok {
+				usage = u
+			}
+			if !firstActivity {
+				firstActivity = true
+				sm.emitProgress(outCtx, ProgressEvent{Channel: channel, ChatID: chatID, Kind: ProgressFirstActivity, Elapsed: time.Since(start)})
+			}
+			switch event.Type {
+			case interfaces.AgentEventContent:
+				if event.Content != "" {
+					sb.WriteString(event.Content)
+					if hasStreamer {
+						_ = streamer.Update(outCtx, sb.String())
+					}
+				}
+			case interfaces.AgentEventToolCall:
+				toolCalls++
+				sm.emitProgress(outCtx, ProgressEvent{
+					Channel:  channel,
+					ChatID:   chatID,
+					Kind:     ProgressToolCallStarted,
+					ToolName: safeToolName(event.ToolCall),
+					Elapsed:  time.Since(start),
+				})
+			case interfaces.AgentEventToolResult:
+				sm.emitProgress(outCtx, ProgressEvent{
+					Channel:  channel,
+					ChatID:   chatID,
+					Kind:     ProgressToolCallFinished,
+					ToolName: safeToolName(event.ToolCall),
+					Elapsed:  time.Since(start),
+				})
+			case interfaces.AgentEventError:
+				if event.Error != nil {
+					streamErr = event.Error
+				} else {
+					streamErr = errors.New("agent stream error")
+				}
+			case interfaces.AgentEventComplete:
+				// Completion is finalized when the event channel closes; SDKs may
+				// still send a trailing error after a complete event.
+			}
+			if streamErr != nil {
+				if hasStreamer {
+					streamer.Cancel(outCtx)
+				}
+				return sb.String(), usage, toolCalls, streamErr
+			}
+		case <-heartbeat.C:
+			sm.emitProgress(outCtx, ProgressEvent{
+				Channel: channel,
+				ChatID:  chatID,
+				Kind:    ProgressHeartbeat,
+				Elapsed: time.Since(lastActivity),
+			})
+			resetTimer(heartbeat, heartbeatInterval)
+		case <-outCtx.Done():
+			if hasStreamer {
+				streamer.Cancel(outCtx)
+			}
+			return sb.String(), usage, toolCalls, outCtx.Err()
+		}
+	}
+}
+
+func (sm *SessionManager) runDetailedTurn(ctx context.Context, input string) (string, *interfaces.TokenUsage, int, error) {
+	response, err := sm.agent.RunDetailed(ctx, input)
+	if err != nil {
+		return "", nil, 0, err
+	}
+	toolCalls := response.ExecutionSummary.ToolCalls
+	return response.Content, meaningfulUsage(response.Usage, response.ExecutionSummary.LLMCalls), toolCalls, nil
+}
+
+func (sm *SessionManager) heartbeatInterval() time.Duration {
+	if sm.progress == nil || sm.progress.HeartbeatInterval() <= 0 {
+		return DefaultDebugHeartbeatInterval
+	}
+	return sm.progress.HeartbeatInterval()
+}
+
+func (sm *SessionManager) emitProgress(ctx context.Context, event ProgressEvent) {
+	if sm.progress != nil {
+		sm.progress.Progress(ctx, event)
+	}
+}
+
+func (sm *SessionManager) emitSummary(ctx context.Context, summary ProgressSummary) {
+	if sm.progress != nil {
+		sm.progress.Summary(ctx, summary)
+	}
+}
+
+func resetTimer(timer *time.Timer, d time.Duration) {
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
+	}
+	timer.Reset(d)
+}
+
+func safeToolName(toolCall *interfaces.ToolCallEvent) string {
+	if toolCall == nil || strings.TrimSpace(toolCall.Name) == "" {
+		return "unknown"
+	}
+	return toolCall.Name
+}
+
+func meaningfulUsage(usage *interfaces.TokenUsage, llmCalls int) *interfaces.TokenUsage {
+	if usage == nil {
+		return nil
+	}
+	if llmCalls == 0 &&
+		usage.InputTokens == 0 &&
+		usage.OutputTokens == 0 &&
+		usage.TotalTokens == 0 &&
+		usage.ReasoningTokens == 0 &&
+		usage.CacheCreationInputTokens == 0 &&
+		usage.CacheReadInputTokens == 0 {
+		return nil
+	}
+	return usage
+}
+
+func tokenUsageFromMetadata(metadata map[string]interface{}) (*interfaces.TokenUsage, bool) {
+	if len(metadata) == 0 {
+		return nil, false
+	}
+	source := metadata
+	if nested, ok := metadata["usage"]; ok {
+		if nestedMap, ok := nested.(map[string]interface{}); ok {
+			source = nestedMap
+		} else if usage, ok := nested.(*interfaces.TokenUsage); ok && usage != nil {
+			return usage, true
+		} else {
+			return nil, false
+		}
+	}
+
+	input, hasInput := firstInt(source, "input_tokens", "prompt_tokens")
+	output, hasOutput := firstInt(source, "output_tokens", "completion_tokens")
+	total, hasTotal := firstInt(source, "total_tokens")
+	if !hasInput && !hasOutput && !hasTotal {
+		return nil, false
+	}
+	if !hasTotal {
+		total = input + output
+	}
+	return &interfaces.TokenUsage{
+		InputTokens:  input,
+		OutputTokens: output,
+		TotalTokens:  total,
+	}, true
+}
+
+func firstInt(m map[string]interface{}, keys ...string) (int, bool) {
+	for _, key := range keys {
+		v, ok := m[key]
+		if !ok {
+			continue
+		}
+		switch n := v.(type) {
+		case int:
+			return n, true
+		case int32:
+			return int(n), true
+		case int64:
+			return int(n), true
+		case float32:
+			return int(n), true
+		case float64:
+			return int(n), true
+		}
+	}
+	return 0, false
 }
 
 func createLLM(cfg *config.Config) (interfaces.LLM, error) {

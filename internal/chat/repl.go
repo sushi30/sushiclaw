@@ -30,7 +30,6 @@ type Runner struct {
 // NewRunner creates a chat runner from config.
 func NewRunner(cfg *config.Config) (*Runner, error) {
 	tools := sushitools.NewChatTools(cfg)
-	tools = sushitools.MaybeAppendSpawnTool(tools, cfg, agent.BuildSubagent)
 
 	agentsdkAgent, err := agent.BuildAgent(cfg, tools)
 	if err != nil {

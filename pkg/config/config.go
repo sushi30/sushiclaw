@@ -90,7 +90,7 @@ type ToolsConfig struct {
 	WriteFile    ToolConfig          `json:"write_file"`
 	ListDir      ToolConfig          `json:"list_dir"`
 	WebSearch    WebSearchToolConfig `json:"web_search"`
-	Spawn        ToolConfig          `json:"spawn"`
+	SubagentTask ToolConfig          `json:"subagent_task"`
 }
 
 func (t ToolsConfig) IsToolEnabled(name string) bool {
@@ -105,8 +105,8 @@ func (t ToolsConfig) IsToolEnabled(name string) bool {
 		return t.ListDir.Enabled
 	case "web_search":
 		return t.WebSearch.Enabled
-	case "spawn":
-		return t.Spawn.Enabled
+	case "subagent_task":
+		return t.SubagentTask.Enabled
 	}
 	return false
 }

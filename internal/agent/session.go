@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	agentsdk "github.com/Ingenimax/agent-sdk-go/pkg/agent"
@@ -19,7 +20,7 @@ import (
 	"github.com/sushi30/sushiclaw/pkg/llm/openrouter"
 	"github.com/sushi30/sushiclaw/pkg/logger"
 	"github.com/sushi30/sushiclaw/pkg/tools/exec"
-	"github.com/sushi30/sushiclaw/pkg/tools/spawn"
+	"github.com/sushi30/sushiclaw/pkg/tools/subagenttask"
 )
 
 // SessionManager wraps an agent-sdk-go Agent and processes inbound bus messages.
@@ -35,15 +36,23 @@ type SessionManager struct {
 
 // BuildAgent creates an agent-sdk-go Agent from config and tools.
 func BuildAgent(cfg *config.Config, tools []interfaces.Tool) (*agentsdk.Agent, error) {
+	subAgents, _, err := buildConfiguredSubAgents(cfg, tools)
+	if err != nil {
+		return nil, err
+	}
 	return buildAgentWithOptions(cfg, agentOptions{
-		name:   "sushiclaw",
-		tools:  tools,
-		memory: NewInMemoryMemory(),
+		name:      "sushiclaw",
+		tools:     tools,
+		memory:    NewInMemoryMemory(),
+		subAgents: subAgents,
 	})
 }
 
 // BuildSubagent creates a sub-agent with optional overrides.
 func BuildSubagent(cfg *config.Config, name, description, modelName, systemPrompt string, tools []interfaces.Tool) (*agentsdk.Agent, error) {
+	if strings.TrimSpace(description) == "" {
+		description = fmt.Sprintf("Configured subagent %q for delegated tasks.", name)
+	}
 	return buildAgentWithOptions(cfg, agentOptions{
 		name:         name,
 		description:  description,
@@ -90,7 +99,7 @@ func buildAgentWithOptions(cfg *config.Config, opts agentOptions) (*agentsdk.Age
 	for i, t := range opts.tools {
 		toolNames[i] = t.Name()
 	}
-	if len(opts.tools) == 0 {
+	if len(opts.tools) == 0 && len(opts.subAgents) == 0 {
 		systemPrompt += "\n\nIMPORTANT: You have no tools available. You cannot execute commands, run code, or take real-world actions. If asked to do any of these, tell the user you are unable to in the current configuration — do not simulate or pretend to execute anything."
 	}
 	logger.DebugCF("agent", "Building agent", map[string]any{
@@ -99,7 +108,7 @@ func buildAgentWithOptions(cfg *config.Config, opts agentOptions) (*agentsdk.Age
 		"prompt_length": len(systemPrompt),
 		"tools":         toolNames,
 	})
-	for _, t := range tools {
+	for _, t := range opts.tools {
 		logger.DebugCF("agent", "Registering tool", map[string]any{
 			"name":        t.Name(),
 			"description": t.Description(),
@@ -114,6 +123,9 @@ func buildAgentWithOptions(cfg *config.Config, opts agentOptions) (*agentsdk.Age
 		agentsdk.WithTools(opts.tools...),
 		agentsdk.WithMemory(opts.memory),
 		agentsdk.WithRequirePlanApproval(false),
+	}
+	if opts.description != "" {
+		agentOpts = append(agentOpts, agentsdk.WithDescription(opts.description))
 	}
 	if maxToolIterations > 0 {
 		agentOpts = append(agentOpts, agentsdk.WithMaxIterations(maxToolIterations))
@@ -162,17 +174,10 @@ func toAgentSDKMCPConfig(cfg config.MCPConfig) *agentsdk.MCPConfiguration {
 func NewSessionManager(cfg *config.Config, messageBus *bus.MessageBus, tools []interfaces.Tool) (*SessionManager, error) {
 	mem := NewInMemoryMemory()
 
-	// Build static subagents from config (without spawn tool to prevent recursion).
-	var subAgents []*agentsdk.Agent
-	var subAgentNames []string
-	filteredTools := toolsWithoutSpawn(tools)
-	for name, sac := range cfg.SubAgents {
-		sa, err := BuildSubagent(cfg, name, sac.Description, sac.ModelName, sac.SystemPrompt, filteredTools)
-		if err != nil {
-			return nil, fmt.Errorf("build subagent %q: %w", name, err)
-		}
-		subAgents = append(subAgents, sa)
-		subAgentNames = append(subAgentNames, name)
+	// Build static subagents from config without the async task tool to prevent recursion.
+	subAgents, subAgentNames, err := buildConfiguredSubAgents(cfg, tools)
+	if err != nil {
+		return nil, err
 	}
 
 	a, err := buildAgentWithOptions(cfg, agentOptions{
@@ -318,7 +323,7 @@ func (sm *SessionManager) handleInbound(ctx context.Context, msg bus.InboundMess
 
 	// Attach chat ID to context for tool use.
 	actx := exec.WithChatID(ctx, chatID)
-	actx = spawn.WithContext(actx, msg.Channel, chatID, msg.Context.ReplyToMessageID)
+	actx = subagenttask.WithContext(actx, msg.Channel, chatID, msg.Context.ReplyToMessageID)
 
 	input := msg.Content
 	if input == "" && len(msg.Media) > 0 {
@@ -396,10 +401,34 @@ func createLLM(cfg *config.Config, modelName string) (interfaces.LLM, error) {
 	}
 }
 
-func toolsWithoutSpawn(tools []interfaces.Tool) []interfaces.Tool {
+func buildConfiguredSubAgents(cfg *config.Config, tools []interfaces.Tool) ([]*agentsdk.Agent, []string, error) {
+	names := sortedSubAgentNames(cfg.SubAgents)
+	subAgents := make([]*agentsdk.Agent, 0, len(names))
+	filteredTools := toolsWithoutSubagentTask(tools)
+	for _, name := range names {
+		sac := cfg.SubAgents[name]
+		sa, err := BuildSubagent(cfg, name, sac.Description, sac.ModelName, sac.SystemPrompt, filteredTools)
+		if err != nil {
+			return nil, nil, fmt.Errorf("build subagent %q: %w", name, err)
+		}
+		subAgents = append(subAgents, sa)
+	}
+	return subAgents, names, nil
+}
+
+func sortedSubAgentNames(subAgents map[string]config.SubAgentConfig) []string {
+	names := make([]string, 0, len(subAgents))
+	for name := range subAgents {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func toolsWithoutSubagentTask(tools []interfaces.Tool) []interfaces.Tool {
 	out := make([]interfaces.Tool, 0, len(tools))
 	for _, t := range tools {
-		if t.Name() == "spawn" {
+		if t.Name() == "subagent_task" {
 			continue
 		}
 		out = append(out, t)

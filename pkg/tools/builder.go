@@ -2,15 +2,16 @@ package tools
 
 import (
 	"github.com/Ingenimax/agent-sdk-go/pkg/interfaces"
+	"github.com/sushi30/sushiclaw/pkg/bus"
 	"github.com/sushi30/sushiclaw/pkg/config"
 	"github.com/sushi30/sushiclaw/pkg/tools/exec"
 	fstools "github.com/sushi30/sushiclaw/pkg/tools/fs"
-	"github.com/sushi30/sushiclaw/pkg/tools/spawn"
+	"github.com/sushi30/sushiclaw/pkg/tools/subagenttask"
 	"github.com/sushi30/sushiclaw/pkg/tools/websearch"
 )
 
-// SpawnFactory is the constructor signature for a sub-agent factory.
-type SpawnFactory = spawn.SubAgentFactory
+// SubAgentFactory is the constructor signature for a sub-agent factory.
+type SubAgentFactory = subagenttask.SubAgentFactory
 
 // NewChatTools returns tools available to the local terminal chat.
 func NewChatTools(cfg *config.Config) []interfaces.Tool {
@@ -67,12 +68,13 @@ func restrictToWorkspace(cfg *config.Config) bool {
 	return cfg != nil && cfg.Agents.Defaults.RestrictToWorkspace
 }
 
-// ToolsWithoutSpawn returns a copy of the tool slice with the spawn tool removed.
-// Use this when building sub-agents to prevent infinite recursion.
-func ToolsWithoutSpawn(tools []interfaces.Tool) []interfaces.Tool {
+// ToolsWithoutSubagentTask returns a copy of the tool slice with the async
+// subagent task tool removed. Use this when building sub-agents to prevent
+// recursive background task spawning.
+func ToolsWithoutSubagentTask(tools []interfaces.Tool) []interfaces.Tool {
 	out := make([]interfaces.Tool, 0, len(tools))
 	for _, t := range tools {
-		if t.Name() == "spawn" {
+		if t.Name() == "subagent_task" {
 			continue
 		}
 		out = append(out, t)
@@ -80,10 +82,10 @@ func ToolsWithoutSpawn(tools []interfaces.Tool) []interfaces.Tool {
 	return out
 }
 
-// MaybeAppendSpawnTool appends the spawn tool if enabled in config.
-func MaybeAppendSpawnTool(tools []interfaces.Tool, cfg *config.Config, factory SpawnFactory) []interfaces.Tool {
-	if !cfg.Tools.IsToolEnabled("spawn") {
+// MaybeAppendSubagentTaskTool appends the async subagent task tool if enabled.
+func MaybeAppendSubagentTaskTool(tools []interfaces.Tool, cfg *config.Config, messageBus *bus.MessageBus, factory SubAgentFactory) []interfaces.Tool {
+	if cfg == nil || !cfg.Tools.IsToolEnabled("subagent_task") || len(cfg.SubAgents) == 0 {
 		return tools
 	}
-	return append(tools, spawn.NewSpawnTool(cfg, ToolsWithoutSpawn(tools), factory))
+	return append(tools, subagenttask.NewTool(cfg, messageBus, ToolsWithoutSubagentTask(tools), factory))
 }

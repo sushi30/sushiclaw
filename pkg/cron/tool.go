@@ -202,33 +202,7 @@ func (t *CronTool) listJobs() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if len(jobs) == 0 {
-		return "No cron jobs scheduled.", nil
-	}
-	var sb strings.Builder
-	sb.WriteString("Scheduled jobs:\n")
-	for _, j := range jobs {
-		fmt.Fprintf(&sb, "- %s", j.Name)
-		if !j.Enabled {
-			sb.WriteString(" [disabled]")
-		}
-		if j.Command != "" {
-			fmt.Fprintf(&sb, " (command: %s)", j.Command)
-		} else if j.Deliver {
-			sb.WriteString(" (direct delivery)")
-		} else {
-			sb.WriteString(" (agent turn)")
-		}
-		if j.AtSeconds != nil {
-			fmt.Fprintf(&sb, " at %ds", *j.AtSeconds)
-		} else if j.EverySeconds != nil {
-			fmt.Fprintf(&sb, " every %ds", *j.EverySeconds)
-		} else if j.CronExpr != "" {
-			fmt.Fprintf(&sb, " cron: %s", j.CronExpr)
-		}
-		sb.WriteByte('\n')
-	}
-	return strings.TrimRight(sb.String(), "\n"), nil
+	return FormatJobs(jobs), nil
 }
 
 func (t *CronTool) removeJob(params map[string]any) (string, error) {

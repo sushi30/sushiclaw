@@ -207,6 +207,37 @@ func TestExecuteDebugNoRuntime(t *testing.T) {
 	assert.Contains(t, replied, "unavailable")
 }
 
+func TestExecuteListCronCallsCallback(t *testing.T) {
+	reg := commands.NewRegistry(commands.BuiltinDefinitions())
+	rt := &commands.Runtime{
+		ListCronJobs: func() (string, error) {
+			return "Scheduled jobs:\n- daily-check cron: 0 9 * * *", nil
+		},
+	}
+	exec := commands.NewExecutor(reg, rt)
+
+	var replied string
+	result := exec.Execute(context.Background(), commands.Request{
+		Text:  "/list cron",
+		Reply: func(s string) error { replied = s; return nil },
+	})
+	assert.Equal(t, commands.OutcomeHandled, result.Outcome)
+	assert.Contains(t, replied, "daily-check")
+}
+
+func TestExecuteListCronUnavailable(t *testing.T) {
+	reg := commands.NewRegistry(commands.BuiltinDefinitions())
+	exec := commands.NewExecutor(reg, &commands.Runtime{})
+
+	var replied string
+	result := exec.Execute(context.Background(), commands.Request{
+		Text:  "/list cron",
+		Reply: func(s string) error { replied = s; return nil },
+	})
+	assert.Equal(t, commands.OutcomeHandled, result.Outcome)
+	assert.Contains(t, replied, "Cron job list unavailable.")
+}
+
 func TestExecutePassthroughNoHandler(t *testing.T) {
 	reg := commands.NewRegistry(commands.BuiltinDefinitions())
 	exec := commands.NewExecutor(reg, &commands.Runtime{})
@@ -278,7 +309,7 @@ func TestExecuteListUsageIncludesSkills(t *testing.T) {
 		Reply: func(s string) error { replied = s; return nil },
 	})
 	assert.Equal(t, commands.OutcomeHandled, result.Outcome)
-	assert.Contains(t, replied, "/list [models|skills]")
+	assert.Contains(t, replied, "/list [models|skills|cron]")
 }
 
 func TestExecuteListUnknownOptionIncludesSkills(t *testing.T) {
@@ -292,7 +323,7 @@ func TestExecuteListUnknownOptionIncludesSkills(t *testing.T) {
 	})
 	assert.Equal(t, commands.OutcomeHandled, result.Outcome)
 	assert.Contains(t, replied, "Unknown option: widgets")
-	assert.Contains(t, replied, "/list [models|skills]")
+	assert.Contains(t, replied, "/list [models|skills|cron]")
 }
 
 func TestExecuteUseSuccess(t *testing.T) {

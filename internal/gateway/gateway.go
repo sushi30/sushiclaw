@@ -108,6 +108,13 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 	}
 	if cronScheduler != nil && cfg.Tools.IsToolEnabled("cron") {
 		tools = append(tools, cron.NewCronTool(cronScheduler, cfg))
+		rt.ListCronJobs = func() (string, error) {
+			jobs, err := cronScheduler.ListJobs()
+			if err != nil {
+				return "", err
+			}
+			return cron.FormatJobs(jobs), nil
+		}
 		logger.InfoC("gateway", "Cron tool registered")
 	}
 

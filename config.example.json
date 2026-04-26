@@ -102,6 +102,9 @@
     },
     "list_dir": {
       "enabled": true
+    },
+    "subagent_task": {
+      "enabled": true
     }
   },
   "mcp": {

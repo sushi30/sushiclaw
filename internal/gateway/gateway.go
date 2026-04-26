@@ -82,7 +82,6 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 		logger.InfoCF("gateway", "Trusted exec registered",
 			map[string]any{"senders": allowedSenders})
 	}
-
 	if cfg.Tools.IsToolEnabled("web_search") {
 		wsTool, err := websearch.NewTool(cfg.Tools.WebSearch)
 		if err != nil {
@@ -94,6 +93,7 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 				map[string]any{"provider": cfg.Tools.WebSearch.Provider})
 		}
 	}
+	tools = sushitools.MaybeAppendSubagentTaskTool(tools, cfg, messageBus, agent.BuildSubagent)
 
 	sessionMgr, err := agent.NewSessionManager(cfg, messageBus, tools)
 	if err != nil {
@@ -151,7 +151,9 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 		rt.ListModels = sessionMgr.ListModels
 		rt.ListSkills = sessionMgr.ListSkills
 		rt.ActivateSkill = sessionMgr.ActivateSkill
+		rt.ListSubAgents = sessionMgr.ListSubAgents
 	}
+
 	executor := commands.NewExecutor(reg, rt)
 
 	// Inbound processing: filter commands, execute handled ones locally,

@@ -63,4 +63,4 @@ When the user asks to start a dev server:
 - Remain effective on constrained hardware
 - Improve through feedback and continued iteration
 
-Read `IDENTITY.md` for identity and stable preferences, and `SOUL.md` for personality and communication style.
+Read `IDENTITY.md` for identity and stable preferences, `MEMORY.md` for long-lived notes, and `SOUL.md` for personality and communication style.

@@ -60,9 +60,33 @@ Calm and concise.
 	assert.Contains(t, prompt, "Fallback identity content.")
 }
 
+func TestBuildSystemPromptIncludesMemoryEntryPoint(t *testing.T) {
+	workspace := t.TempDir()
+	writeWorkspaceFile(t, workspace, "AGENT.md", `You are the test agent.`)
+	writeWorkspaceFile(t, workspace, "IDENTITY.md", `Preferred identity content.`)
+	writeWorkspaceFile(t, workspace, "SOUL.md", `# Soul
+
+Calm and concise.
+`)
+	writeWorkspaceFile(t, workspace, filepath.Join("memory", "MEMORY.md"), `# Long-term Memory
+
+Remember to keep responses brief.
+`)
+
+	prompt, err := agent.NewContextBuilder(workspace).BuildSystemPromptWithCache()
+	require.NoError(t, err)
+
+	assert.Contains(t, prompt, "## Memory")
+	assert.Contains(t, prompt, "Remember to keep responses brief.")
+}
+
 func writeWorkspaceFile(t *testing.T, workspace, name, content string) {
 	t.Helper()
 
-	err := os.WriteFile(filepath.Join(workspace, name), []byte(content), 0o600)
+	path := filepath.Join(workspace, name)
+	err := os.MkdirAll(filepath.Dir(path), 0o755)
+	require.NoError(t, err)
+
+	err = os.WriteFile(path, []byte(content), 0o600)
 	require.NoError(t, err)
 }

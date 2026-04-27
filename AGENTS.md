@@ -196,6 +196,7 @@ The agent loads markdown files from `agents.defaults.workspace` at startup to bu
 |------|---------|
 | `AGENT.md` | Agent name, role, mission, capabilities |
 | `IDENTITY.md` | Identity, profile details, stable preferences |
+| `MEMORY.md` | Durable notes, long-lived facts, session-independent context |
 | `SOUL.md` | Personality and communication style |
 | `USER.md` | Legacy alias for `IDENTITY.md` in older workspaces |
 

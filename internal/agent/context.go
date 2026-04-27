@@ -12,7 +12,7 @@ import (
 )
 
 // ContextBuilder assembles the agent system prompt from workspace files:
-// AGENT.md, IDENTITY.md, SOUL.md, USER.md, and skills/*/SKILL.md.
+// AGENT.md, IDENTITY.md, MEMORY.md, SOUL.md, USER.md, and skills/*/SKILL.md.
 // Prompts are cached and invalidated when source file mtimes change.
 type ContextBuilder struct {
 	workspace string
@@ -82,6 +82,10 @@ func (b *ContextBuilder) buildPrompt() (string, error) {
 		sections = append(sections, soul)
 	}
 
+	if memory, ok := b.readFileIfExists(filepath.Join(b.workspace, "memory", "MEMORY.md")); ok {
+		sections = append(sections, "## Memory\n\n"+memory)
+	}
+
 	if summary := b.skillsSummary(filepath.Join(b.workspace, "skills")); summary != "" {
 		sections = append(sections, summary)
 	}
@@ -138,6 +142,7 @@ func (b *ContextBuilder) captureBaseline() (map[string]time.Time, map[string]boo
 	paths := []string{
 		filepath.Join(b.workspace, "AGENT.md"),
 		filepath.Join(b.workspace, "IDENTITY.md"),
+		filepath.Join(b.workspace, "memory", "MEMORY.md"),
 		filepath.Join(b.workspace, "SOUL.md"),
 		filepath.Join(b.workspace, "USER.md"),
 	}
@@ -232,6 +237,7 @@ func workspaceEntrypointsSection() string {
 
 - ` + "`AGENT.md`" + `: authoritative source for role, mission, capabilities, tool scope, and other assistant-level behavior.
 - ` + "`IDENTITY.md`" + `: authoritative source for identity, profile details, naming, and stable preferences.
+- ` + "`MEMORY.md`" + `: authoritative source for durable notes, long-lived facts, and session-independent context.
 - ` + "`SOUL.md`" + `: authoritative source for personality, tone, and communication style.
 - ` + "`USER.md`" + `: legacy alias for ` + "`IDENTITY.md`" + `; use only when a workspace has not been migrated yet.
 

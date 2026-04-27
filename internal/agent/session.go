@@ -314,7 +314,7 @@ func (sm *SessionManager) handleInbound(ctx context.Context, msg bus.InboundMess
 	start := time.Now()
 	sm.emitProgress(ctx, ProgressEvent{Channel: msg.Channel, ChatID: chatID, Kind: ProgressTurnStarted})
 
-	response, usage, toolCalls, err := sm.runStreamingTurn(actx, ctx, msg.Channel, chatID, input, start)
+	response, err := sm.agent.Run(actx, input)
 	if err != nil {
 		logger.ErrorCF("agent", "Agent run failed", map[string]any{"error": err.Error()})
 		_ = sm.bus.PublishOutbound(ctx, bus.OutboundMessage{
@@ -327,8 +327,6 @@ func (sm *SessionManager) handleInbound(ctx context.Context, msg bus.InboundMess
 			Channel:   msg.Channel,
 			ChatID:    chatID,
 			Success:   false,
-			ToolCalls: toolCalls,
-			Usage:     usage,
 			Duration:  time.Since(start),
 			Error:     err,
 		})
@@ -347,8 +345,6 @@ func (sm *SessionManager) handleInbound(ctx context.Context, msg bus.InboundMess
 		Channel:   msg.Channel,
 		ChatID:    chatID,
 		Success:   true,
-		ToolCalls: toolCalls,
-		Usage:     usage,
 		Duration:  time.Since(start),
 	})
 }

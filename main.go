@@ -19,6 +19,7 @@ import (
 	"github.com/sushi30/sushiclaw/pkg/logger"
 
 	// Register owned channel implementations.
+	_ "github.com/sushi30/sushiclaw/pkg/channels/email"
 	_ "github.com/sushi30/sushiclaw/pkg/channels/telegram"
 	_ "github.com/sushi30/sushiclaw/pkg/channels/whatsapp_native"
 )

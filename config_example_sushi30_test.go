@@ -1,13 +1,11 @@
 package main_test
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
 
-	"github.com/sushi30/sushiclaw/pkg/channels/email"
 	"github.com/sushi30/sushiclaw/pkg/config"
 )
 
@@ -66,15 +64,21 @@ func TestExampleConfigLoadsAsV2(t *testing.T) {
 		t.Error("telegram streaming.enabled should be true in example config")
 	}
 
-	// Email is wired separately via email.InitChannel (not through ChannelsConfig).
-	// Decode email_channel directly into email.EmailConfig so json tag renames break this test.
-	var rawTop struct {
-		EmailChannel email.EmailConfig `json:"email_channel"`
+	emailCh := cfg.Channels["email"]
+	if emailCh == nil {
+		t.Fatal("email channel config missing")
 	}
-	if err := json.Unmarshal(data, &rawTop); err != nil {
-		t.Fatalf("parse email_channel section: %v", err)
+	if emailCh.Type != config.ChannelEmail {
+		t.Errorf("email type = %q, want %q", emailCh.Type, config.ChannelEmail)
 	}
-	if rawTop.EmailChannel.SMTPHost == "" {
-		t.Error("email_channel.smtp_host missing from example config")
+	var emailCfg config.EmailSettings
+	if err := emailCh.Decode(&emailCfg); err != nil {
+		t.Fatalf("decode email settings: %v", err)
+	}
+	if emailCfg.SMTPHost == "" {
+		t.Error("channels.email.smtp_host missing from example config")
+	}
+	if emailCfg.IMAPPassword.String() == "" {
+		t.Error("channels.email.imap_password missing from example config")
 	}
 }

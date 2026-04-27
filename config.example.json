@@ -43,21 +43,24 @@
       "streaming": {
         "enabled": true
       }
+    },
+    "email": {
+      "enabled": false,
+      "type": "email",
+      "smtp_host": "smtp.example.com",
+      "smtp_port": 587,
+      "smtp_from": "bot@example.com",
+      "smtp_user": "",
+      "smtp_password": "env://EMAIL_SMTP_PASSWORD",
+      "default_subject": "Message from sushiclaw",
+      "imap_host": "imap.example.com",
+      "imap_port": 993,
+      "imap_user": "bot@example.com",
+      "imap_password": "env://EMAIL_IMAP_PASSWORD",
+      "poll_interval_secs": 30,
+      "allow_from": [],
+      "reasoning_channel_id": ""
     }
-  },
-  "email_channel": {
-    "enabled": false,
-    "smtp_host": "smtp.example.com",
-    "smtp_port": 587,
-    "smtp_from": "bot@example.com",
-    "smtp_user": "",
-    "default_subject": "Message from sushiclaw",
-    "imap_host": "imap.example.com",
-    "imap_port": 993,
-    "imap_user": "bot@example.com",
-    "poll_interval_secs": 30,
-    "allow_from": [],
-    "reasoning_channel_id": ""
   },
   "gateway": {
     "host": "0.0.0.0",

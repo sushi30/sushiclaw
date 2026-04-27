@@ -96,6 +96,26 @@ func TestThreadManager_ReferencesChain(t *testing.T) {
 	}
 }
 
+func TestThreadManager_ThreadID(t *testing.T) {
+	tm := NewThreadManager()
+	tm.ProcessHeaders("root@x.com", "Root", "", "")
+	tm.ProcessHeaders("child@x.com", "Re: Root", "root@x.com", "<root@x.com>")
+	tm.ProcessHeaders("grandchild@x.com", "Re: Root", "child@x.com", "<root@x.com> <child@x.com>")
+
+	if got := tm.ThreadID("root@x.com"); got != "root@x.com" {
+		t.Errorf("ThreadID(root) = %q, want root@x.com", got)
+	}
+	if got := tm.ThreadID("child@x.com"); got != "root@x.com" {
+		t.Errorf("ThreadID(child) = %q, want root@x.com", got)
+	}
+	if got := tm.ThreadID("grandchild@x.com"); got != "root@x.com" {
+		t.Errorf("ThreadID(grandchild) = %q, want root@x.com", got)
+	}
+	if got := tm.ThreadID("unknown@x.com"); got != "unknown@x.com" {
+		t.Errorf("ThreadID(unknown) = %q, want unknown@x.com", got)
+	}
+}
+
 func TestThreadManager_BuildThreads(t *testing.T) {
 	tm := NewThreadManager()
 	tm.ProcessHeaders("root1@x.com", "Thread A", "", "")

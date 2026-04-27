@@ -265,6 +265,9 @@ func (s *Scheduler) executeJob(job Job) {
 }
 
 func (s *Scheduler) agentTurn(ctx context.Context, job Job) {
+	// Cron agent turns share the target chat's session (channel:chatID).
+	// If the session was evicted due to inactivity, getOrCreateSession
+	// lazily builds a fresh one, so the cron job always runs.
 	msg := bus.InboundMessage{
 		Context: bus.InboundContext{
 			Channel:  job.Channel,
@@ -274,7 +277,8 @@ func (s *Scheduler) agentTurn(ctx context.Context, job Job) {
 		Sender: bus.SenderInfo{
 			CanonicalID: job.SenderID,
 		},
-		Content: job.Message,
+		Content:    job.Message,
+		SessionKey: job.Channel + ":" + job.ChatID,
 	}
 	if err := s.bus.PublishInbound(ctx, msg); err != nil {
 		logger.ErrorCF("cron", "Failed to publish inbound cron job", map[string]any{

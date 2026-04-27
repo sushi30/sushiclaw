@@ -70,9 +70,10 @@ func (c *collectingProgress) Summary(_ context.Context, summary ProgressSummary)
 func TestSessionManagerDebugStartCompletionAndSummary(t *testing.T) {
 	extBus := bus.NewMessageBus()
 	progress := &collectingProgress{}
-	sm := &SessionManager{agent: &mockRunner{runResult: "hello"}, bus: extBus, progress: progress}
+	sm := &SessionManager{bus: extBus, progress: progress}
+	session := &Session{agent: &mockRunner{runResult: "hello"}, mgr: sm}
 
-	sm.handleInbound(t.Context(), inbound("telegram", "chat1", "hi"))
+	session.handleInbound(t.Context(), inbound("telegram", "chat1", "hi"), "telegram:chat1")
 
 	msg := requireOutboundMessage(t, extBus)
 	assert.Equal(t, "hello", msg.Content)
@@ -101,9 +102,10 @@ func TestSessionManagerDebugToolEventsUseOnlyNames(t *testing.T) {
 		interfaces.AgentStreamEvent{Type: interfaces.AgentEventContent, Content: "done"},
 	)
 	progress := &collectingProgress{}
-	sm := &SessionManager{agent: &mockRunner{stream: events}, bus: bus.NewMessageBus(), progress: progress}
+	sm := &SessionManager{bus: bus.NewMessageBus(), progress: progress}
+	session := &Session{agent: &mockRunner{stream: events}, mgr: sm}
 
-	response, _, toolCalls, err := sm.runStreamingTurn(t.Context(), t.Context(), "telegram", "chat1", "run", time.Now())
+	response, _, toolCalls, err := session.runStreamingTurn(t.Context(), t.Context(), "telegram", "chat1", "run", time.Now())
 
 	require.NoError(t, err)
 	assert.Equal(t, "done", response)
@@ -137,9 +139,10 @@ func TestSessionManagerDebugTokenSummaryFromStreamMetadata(t *testing.T) {
 		},
 	)
 	progress := &collectingProgress{}
-	sm := &SessionManager{agent: &mockRunner{stream: events}, bus: bus.NewMessageBus(), progress: progress}
+	sm := &SessionManager{bus: bus.NewMessageBus(), progress: progress}
+	session := &Session{agent: &mockRunner{stream: events}, mgr: sm}
 
-	_, usage, _, err := sm.runStreamingTurn(t.Context(), t.Context(), "telegram", "chat1", "tokens", time.Now())
+	_, usage, _, err := session.runStreamingTurn(t.Context(), t.Context(), "telegram", "chat1", "tokens", time.Now())
 
 	require.NoError(t, err)
 	require.NotNil(t, usage)
@@ -156,9 +159,10 @@ func TestSessionManagerDebugHeartbeatAfterSilence(t *testing.T) {
 		close(ch)
 	}()
 	progress := &collectingProgress{heartbeat: 10 * time.Millisecond}
-	sm := &SessionManager{agent: &mockRunner{stream: ch}, bus: bus.NewMessageBus(), progress: progress}
+	sm := &SessionManager{bus: bus.NewMessageBus(), progress: progress}
+	session := &Session{agent: &mockRunner{stream: ch}, mgr: sm}
 
-	_, _, _, err := sm.runStreamingTurn(t.Context(), t.Context(), "telegram", "chat1", "slow", time.Now())
+	_, _, _, err := session.runStreamingTurn(t.Context(), t.Context(), "telegram", "chat1", "slow", time.Now())
 
 	require.NoError(t, err)
 	assertHasEvent(t, progress.events, ProgressHeartbeat)
@@ -168,9 +172,10 @@ func TestSessionManagerRunErrorPublishesOneUserErrorAndFailureSummary(t *testing
 	runErr := errors.New("run failed")
 	extBus := bus.NewMessageBus()
 	progress := &collectingProgress{}
-	sm := &SessionManager{agent: &mockRunner{runErr: runErr}, bus: extBus, progress: progress}
+	sm := &SessionManager{bus: extBus, progress: progress}
+	session := &Session{agent: &mockRunner{runErr: runErr}, mgr: sm}
 
-	sm.handleInbound(t.Context(), inbound("telegram", "chat1", "bad"))
+	session.handleInbound(t.Context(), inbound("telegram", "chat1", "bad"), "telegram:chat1")
 
 	msg := requireOutboundMessage(t, extBus)
 	assert.Equal(t, "Error: run failed", msg.Content)
@@ -184,7 +189,8 @@ func TestSessionManagerRunErrorPublishesOneUserErrorAndFailureSummary(t *testing
 func TestSessionManagerStreamingStartupFallbackUsesDetailedUsage(t *testing.T) {
 	startErr := errors.New("no streaming")
 	progress := &collectingProgress{}
-	sm := &SessionManager{
+	sm := &SessionManager{bus: bus.NewMessageBus(), progress: progress}
+	session := &Session{
 		agent: &mockRunner{
 			streamErr: startErr,
 			detailed: &interfaces.AgentResponse{
@@ -196,11 +202,10 @@ func TestSessionManagerStreamingStartupFallbackUsesDetailedUsage(t *testing.T) {
 				},
 			},
 		},
-		bus:      bus.NewMessageBus(),
-		progress: progress,
+		mgr: sm,
 	}
 
-	response, usage, toolCalls, err := sm.runStreamingTurn(t.Context(), t.Context(), "telegram", "chat1", "fallback", time.Now())
+	response, usage, toolCalls, err := session.runStreamingTurn(t.Context(), t.Context(), "telegram", "chat1", "fallback", time.Now())
 
 	require.NoError(t, err)
 	assert.Equal(t, "fallback", response)

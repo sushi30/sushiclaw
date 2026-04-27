@@ -90,7 +90,7 @@ func TestExecuteClearCallsCallback(t *testing.T) {
 	cleared := false
 	reg := commands.NewRegistry(commands.BuiltinDefinitions())
 	rt := &commands.Runtime{
-		ClearHistory: func() error { cleared = true; return nil },
+		ClearHistory: func(req commands.Request) error { cleared = true; return nil },
 	}
 	exec := commands.NewExecutor(reg, rt)
 
@@ -329,7 +329,7 @@ func TestExecuteListUnknownOptionIncludesSkills(t *testing.T) {
 func TestExecuteUseSuccess(t *testing.T) {
 	reg := commands.NewRegistry(commands.BuiltinDefinitions())
 	rt := &commands.Runtime{
-		ActivateSkill: func(name string) error { return nil },
+		ActivateSkill: func(req commands.Request, name string) error { return nil },
 	}
 	exec := commands.NewExecutor(reg, rt)
 
@@ -358,7 +358,7 @@ func TestExecuteUseMissingArg(t *testing.T) {
 func TestExecuteUseAlreadyLoaded(t *testing.T) {
 	reg := commands.NewRegistry(commands.BuiltinDefinitions())
 	rt := &commands.Runtime{
-		ActivateSkill: func(name string) error { return commands.ErrSkillAlreadyLoaded },
+		ActivateSkill: func(req commands.Request, name string) error { return commands.ErrSkillAlreadyLoaded },
 	}
 	exec := commands.NewExecutor(reg, rt)
 
@@ -374,7 +374,7 @@ func TestExecuteUseAlreadyLoaded(t *testing.T) {
 func TestExecuteUseCallbackError(t *testing.T) {
 	reg := commands.NewRegistry(commands.BuiltinDefinitions())
 	rt := &commands.Runtime{
-		ActivateSkill: func(name string) error { return assert.AnError },
+		ActivateSkill: func(req commands.Request, name string) error { return assert.AnError },
 	}
 	exec := commands.NewExecutor(reg, rt)
 

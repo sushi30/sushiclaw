@@ -12,7 +12,7 @@ import (
 )
 
 // ContextBuilder assembles the agent system prompt from workspace files:
-// AGENT.md, SOUL.md, USER.md, and skills/*/SKILL.md.
+// AGENT.md, IDENTITY.md, SOUL.md, USER.md, and skills/*/SKILL.md.
 // Prompts are cached and invalidated when source file mtimes change.
 type ContextBuilder struct {
 	workspace string
@@ -71,12 +71,15 @@ func (b *ContextBuilder) buildPrompt() (string, error) {
 		}
 	}
 
-	if soul, ok := b.readFileIfExists(filepath.Join(b.workspace, "SOUL.md")); ok {
-		sections = append(sections, soul)
+	if identity, ok := b.readFirstExistingFile(
+		filepath.Join(b.workspace, "IDENTITY.md"),
+		filepath.Join(b.workspace, "USER.md"),
+	); ok {
+		sections = append(sections, "## Identity\n\n"+identity)
 	}
 
-	if user, ok := b.readFileIfExists(filepath.Join(b.workspace, "USER.md")); ok {
-		sections = append(sections, "## User Profile\n\n"+user)
+	if soul, ok := b.readFileIfExists(filepath.Join(b.workspace, "SOUL.md")); ok {
+		sections = append(sections, soul)
 	}
 
 	if summary := b.skillsSummary(filepath.Join(b.workspace, "skills")); summary != "" {
@@ -88,6 +91,7 @@ func (b *ContextBuilder) buildPrompt() (string, error) {
 		return "", nil
 	}
 
+	sections = append([]string{workspaceEntrypointsSection()}, sections...)
 	return strings.Join(sections, "\n\n---\n\n"), nil
 }
 
@@ -133,6 +137,7 @@ func (b *ContextBuilder) cacheValidLocked() bool {
 func (b *ContextBuilder) captureBaseline() (map[string]time.Time, map[string]bool) {
 	paths := []string{
 		filepath.Join(b.workspace, "AGENT.md"),
+		filepath.Join(b.workspace, "IDENTITY.md"),
 		filepath.Join(b.workspace, "SOUL.md"),
 		filepath.Join(b.workspace, "USER.md"),
 	}
@@ -211,6 +216,26 @@ func (b *ContextBuilder) readFileIfExists(path string) (string, bool) {
 		return "", false
 	}
 	return strings.TrimSpace(string(data)), true
+}
+
+func (b *ContextBuilder) readFirstExistingFile(paths ...string) (string, bool) {
+	for _, path := range paths {
+		if content, ok := b.readFileIfExists(path); ok {
+			return content, true
+		}
+	}
+	return "", false
+}
+
+func workspaceEntrypointsSection() string {
+	return strings.TrimSpace(`## Workspace entrypoints
+
+- ` + "`AGENT.md`" + `: authoritative source for role, mission, capabilities, tool scope, and other assistant-level behavior.
+- ` + "`IDENTITY.md`" + `: authoritative source for identity, profile details, naming, and stable preferences.
+- ` + "`SOUL.md`" + `: authoritative source for personality, tone, and communication style.
+- ` + "`USER.md`" + `: legacy alias for ` + "`IDENTITY.md`" + `; use only when a workspace has not been migrated yet.
+
+When a user asks you to change how the assistant behaves, infer the correct entrypoint from the requested change and edit that file directly. Do not ask the user which workspace file to touch.`)
 }
 
 // parseMarkdownBody strips YAML frontmatter (--- ... ---) from markdown content

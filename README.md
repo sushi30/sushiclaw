@@ -222,13 +222,14 @@ The legacy top-level `email_channel` key is no longer supported.
 
 ## Workspace customization
 
-The agent loads three Markdown files from `agents.defaults.workspace` at startup:
+The agent loads workspace markdown entrypoints from `agents.defaults.workspace` at startup:
 
 | File | Purpose |
 |------|---------|
 | `AGENT.md` | Agent name, role, mission, capabilities |
+| `IDENTITY.md` | Identity, profile details, stable preferences |
 | `SOUL.md` | Personality and communication style |
-| `USER.md` | Information about you (name, timezone, preferences) |
+| `USER.md` | Legacy alias for `IDENTITY.md` in older workspaces |
 
 Edit these to shape how the agent behaves and presents itself.
 

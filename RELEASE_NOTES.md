@@ -1,54 +1,26 @@
 # Release Notes
 
-## Email channel config migration (fix/email4)
+## Email Channel Config Migration
 
-### What changed
+### What Changed
 
-The email channel is wired manually outside the standard channel registry.
-This means email config must live under the top-level `email_channel` key,
-**not** inside the `channels` map.
+Email is now a first-class channel registered through the standard `channels`
+map. The legacy top-level `email_channel` key is no longer supported.
 
-If your config has `channels.email`, startup will fail with:
+If your config still uses `email_channel`, the gateway will ignore that block
+and no email channel will be started. Move the settings to `channels.email`.
 
-```
-error loading config: channel "email" has unknown type "email"
-```
+### Required Config Migration
 
-### Required config migration
-
-Open `~/.picoclaw/config.json` (or `$SUSHICLAW_CONFIG`) and move the email
-block from `channels` to a top-level `email_channel` key.
+Open `~/.picoclaw/config.json` or `$SUSHICLAW_CONFIG` and move the email block
+from the top-level `email_channel` key into the `channels` map.
 
 **Before:**
 
 ```json
 {
   "channels": {
-    "whatsapp": { ... },
-    "email": {
-      "enabled": true,
-      "smtp_host": "smtp.gmail.com",
-      "smtp_port": 587,
-      "smtp_from": "env://SMTP_USER",
-      "smtp_user": "env://SMTP_USER",
-      "smtp_password": "env://SMTP_PASSWORD",
-      "imap_host": "imap.gmail.com",
-      "imap_port": 993,
-      "imap_user": "env://SMTP_USER",
-      "imap_password": "env://SMTP_PASSWORD",
-      "poll_interval_secs": 10,
-      "allow_from": ["you@example.com"]
-    }
-  }
-}
-```
-
-**After:**
-
-```json
-{
-  "channels": {
-    "whatsapp": { ... }
+    "telegram": { "...": "..." }
   },
   "email_channel": {
     "enabled": true,
@@ -67,11 +39,37 @@ block from `channels` to a top-level `email_channel` key.
 }
 ```
 
-### Reference: full email_channel options
+**After:**
+
+```json
+{
+  "channels": {
+    "telegram": { "...": "..." },
+    "email": {
+      "enabled": true,
+      "type": "email",
+      "smtp_host": "smtp.gmail.com",
+      "smtp_port": 587,
+      "smtp_from": "env://SMTP_USER",
+      "smtp_user": "env://SMTP_USER",
+      "smtp_password": "env://SMTP_PASSWORD",
+      "imap_host": "imap.gmail.com",
+      "imap_port": 993,
+      "imap_user": "env://SMTP_USER",
+      "imap_password": "env://SMTP_PASSWORD",
+      "poll_interval_secs": 10,
+      "allow_from": ["you@example.com"]
+    }
+  }
+}
+```
+
+### Reference: Full `channels.email` Options
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `enabled` | bool | Enable/disable the email channel |
+| `type` | string | Use `email`; required for custom channel keys |
 | `smtp_host` | string | SMTP server hostname |
 | `smtp_port` | int | SMTP port (typically 587 for TLS, 465 for SSL) |
 | `smtp_from` | string | Sender address (supports `env://VAR`) |

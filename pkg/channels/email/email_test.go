@@ -2,7 +2,6 @@ package email
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -17,6 +16,22 @@ import (
 	"github.com/sushi30/sushiclaw/pkg/config"
 	"github.com/sushi30/sushiclaw/pkg/media"
 )
+
+func testEmailBaseChannel(name string) *config.Channel {
+	ch := &config.Channel{
+		Enabled:            true,
+		Type:               config.ChannelEmail,
+		AllowFrom:          config.FlexibleStringSlice{"*"},
+		ReasoningChannelID: "reasoning-email",
+	}
+	ch.SetName(name)
+	return ch
+}
+
+func newTestEmailChannel(t *testing.T, cfg EmailConfig, msgBus *bus.MessageBus) (*EmailChannel, error) {
+	t.Helper()
+	return NewEmailChannel(testEmailBaseChannel("email"), &cfg, msgBus)
+}
 
 func TestGenerateMessageID(t *testing.T) {
 	got := generateMessageID("example.com")
@@ -39,16 +54,17 @@ func TestNewEmailChannel(t *testing.T) {
 	msgBus := bus.NewMessageBus()
 
 	validCfg := EmailConfig{
-		SMTPHost: "smtp.example.com",
-		SMTPFrom: *config.NewSecureString("bot@example.com"),
-		IMAPHost: "imap.example.com",
-		IMAPUser: *config.NewSecureString("bot@example.com"),
+		SMTPHost:     "smtp.example.com",
+		SMTPFrom:     *config.NewSecureString("bot@example.com"),
+		IMAPHost:     "imap.example.com",
+		IMAPUser:     *config.NewSecureString("bot@example.com"),
+		IMAPPassword: *config.NewSecureString("password"),
 	}
 
 	t.Run("missing smtp_host", func(t *testing.T) {
 		cfg := validCfg
 		cfg.SMTPHost = ""
-		_, err := NewEmailChannel(cfg, msgBus)
+		_, err := newTestEmailChannel(t, cfg, msgBus)
 		if err == nil {
 			t.Error("expected error for missing smtp_host, got nil")
 		}
@@ -57,7 +73,7 @@ func TestNewEmailChannel(t *testing.T) {
 	t.Run("missing smtp_from", func(t *testing.T) {
 		cfg := validCfg
 		cfg.SMTPFrom = config.SecureString{}
-		_, err := NewEmailChannel(cfg, msgBus)
+		_, err := newTestEmailChannel(t, cfg, msgBus)
 		if err == nil {
 			t.Error("expected error for missing smtp_from, got nil")
 		}
@@ -66,7 +82,7 @@ func TestNewEmailChannel(t *testing.T) {
 	t.Run("missing imap_host", func(t *testing.T) {
 		cfg := validCfg
 		cfg.IMAPHost = ""
-		_, err := NewEmailChannel(cfg, msgBus)
+		_, err := newTestEmailChannel(t, cfg, msgBus)
 		if err == nil {
 			t.Error("expected error for missing imap_host, got nil")
 		}
@@ -75,14 +91,32 @@ func TestNewEmailChannel(t *testing.T) {
 	t.Run("missing imap_user", func(t *testing.T) {
 		cfg := validCfg
 		cfg.IMAPUser = config.SecureString{}
-		_, err := NewEmailChannel(cfg, msgBus)
+		_, err := newTestEmailChannel(t, cfg, msgBus)
 		if err == nil {
 			t.Error("expected error for missing imap_user, got nil")
 		}
 	})
 
+	t.Run("missing imap_password", func(t *testing.T) {
+		cfg := validCfg
+		cfg.IMAPPassword = config.SecureString{}
+		_, err := newTestEmailChannel(t, cfg, msgBus)
+		if err == nil {
+			t.Error("expected error for missing imap_password, got nil")
+		}
+	})
+
+	t.Run("unresolved required env var", func(t *testing.T) {
+		cfg := validCfg
+		cfg.IMAPPassword.Set("env://MISSING_IMAP_PASSWORD")
+		_, err := newTestEmailChannel(t, cfg, msgBus)
+		if err == nil {
+			t.Error("expected error for unresolved imap_password, got nil")
+		}
+	})
+
 	t.Run("valid config", func(t *testing.T) {
-		ch, err := NewEmailChannel(validCfg, msgBus)
+		ch, err := newTestEmailChannel(t, validCfg, msgBus)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -91,6 +125,24 @@ func TestNewEmailChannel(t *testing.T) {
 		}
 		if ch.IsRunning() {
 			t.Error("new channel should not be running")
+		}
+	})
+
+	t.Run("uses configured channel name and common fields", func(t *testing.T) {
+		bc := testEmailBaseChannel("work_email")
+		bc.AllowFrom = config.FlexibleStringSlice{"allowed@example.com"}
+		ch, err := NewEmailChannel(bc, &validCfg, msgBus)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if ch.Name() != "work_email" {
+			t.Errorf("Name() = %q, want %q", ch.Name(), "work_email")
+		}
+		if !ch.IsAllowed("allowed@example.com") {
+			t.Error("expected allow_from from common channel config to be used")
+		}
+		if ch.ReasoningChannelID() != "reasoning-email" {
+			t.Errorf("ReasoningChannelID() = %q, want reasoning-email", ch.ReasoningChannelID())
 		}
 	})
 }
@@ -163,113 +215,57 @@ func TestDisplayName(t *testing.T) {
 	}
 }
 
-func TestLoadEmailConfig_ResolvesEnvSecureStrings(t *testing.T) {
-	t.Setenv("EMAIL_SMTP_PASS", "secret-smtp-pass")
-	t.Setenv("EMAIL_IMAP_PASS", "secret-imap-pass")
+func TestEmailFactoryRegistered(t *testing.T) {
+	names := channels.GetRegisteredFactoryNames()
+	for _, name := range names {
+		if name == config.ChannelEmail {
+			return
+		}
+	}
+	t.Fatalf("email factory was not registered; factories=%v", names)
+}
 
-	raw := map[string]any{
-		"channels": map[string]any{
-			"email": map[string]any{
-				"enabled":       true,
-				"smtp_host":     "smtp.example.com",
-				"smtp_from":     "bot@example.com",
-				"smtp_password": "env://EMAIL_SMTP_PASS",
-				"imap_host":     "imap.example.com",
-				"imap_user":     "bot@example.com",
-				"imap_password": "env://EMAIL_IMAP_PASS",
+func TestManagerCreatesEmailChannelFromChannelsConfig(t *testing.T) {
+	mb := bus.NewMessageBus()
+	defer mb.Close()
+
+	cfg := &config.Config{
+		Channels: config.ChannelsConfig{
+			"email": {
+				Enabled:   true,
+				Type:      config.ChannelEmail,
+				AllowFrom: config.FlexibleStringSlice{"allowed@example.com"},
 			},
 		},
 	}
-	data, err := json.Marshal(raw)
+	cfg.Channels["email"].SetName("email")
+
+	settingsJSON := []byte(`{
+		"enabled": true,
+		"type": "email",
+		"smtp_host": "smtp.example.com",
+		"smtp_from": "bot@example.com",
+		"imap_host": "imap.example.com",
+		"imap_user": "bot@example.com",
+		"imap_password": "password",
+		"allow_from": ["allowed@example.com"]
+	}`)
+	if err := cfg.Channels["email"].UnmarshalJSON(settingsJSON); err != nil {
+		t.Fatalf("unmarshal email channel: %v", err)
+	}
+	cfg.Channels["email"].SetName("email")
+
+	m, err := channels.NewManager(cfg, mb, media.NewFileMediaStore())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("NewManager: %v", err)
 	}
 
-	f, err := os.CreateTemp(t.TempDir(), "config*.json")
-	if err != nil {
-		t.Fatal(err)
+	for _, name := range m.GetEnabledChannels() {
+		if name == "email" {
+			return
+		}
 	}
-	if _, err := f.Write(data); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	t.Setenv("SUSHICLAW_CONFIG", f.Name())
-
-	cfg, err := loadEmailConfig()
-	if err != nil {
-		t.Fatalf("loadEmailConfig() error: %v", err)
-	}
-
-	if got := cfg.SMTPPassword.String(); got != "secret-smtp-pass" {
-		t.Errorf("SMTPPassword = %q, want %q", got, "secret-smtp-pass")
-	}
-	if got := cfg.IMAPPassword.String(); got != "secret-imap-pass" {
-		t.Errorf("IMAPPassword = %q, want %q", got, "secret-imap-pass")
-	}
-}
-
-func writeConfigFile(t *testing.T, raw map[string]any) string {
-	t.Helper()
-	data, err := json.Marshal(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f, err := os.CreateTemp(t.TempDir(), "config*.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.Write(data); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return f.Name()
-}
-
-func TestInitChannel_Disabled_ReturnsNil(t *testing.T) {
-	raw := map[string]any{
-		"channels": map[string]any{
-			"email": map[string]any{"enabled": false},
-		},
-	}
-	t.Setenv("SUSHICLAW_CONFIG", writeConfigFile(t, raw))
-
-	ch, err := InitChannel(bus.NewMessageBus())
-	if err != nil {
-		t.Fatalf("InitChannel() error = %v, want nil", err)
-	}
-	if ch != nil {
-		t.Errorf("InitChannel() = %v, want nil for disabled channel", ch)
-	}
-}
-
-func TestInitChannel_MissingRequiredEnvVar_ReturnsError(t *testing.T) {
-	_ = os.Unsetenv("MISSING_IMAP_USER")
-	raw := map[string]any{
-		"channels": map[string]any{
-			"email": map[string]any{
-				"enabled":       true,
-				"smtp_host":     "smtp.example.com",
-				"smtp_from":     "bot@example.com",
-				"imap_host":     "imap.example.com",
-				"imap_user":     "env://MISSING_IMAP_USER",
-				"imap_password": "env://MISSING_IMAP_USER",
-			},
-		},
-	}
-	t.Setenv("SUSHICLAW_CONFIG", writeConfigFile(t, raw))
-
-	_, err := InitChannel(bus.NewMessageBus())
-	if err == nil {
-		t.Fatal("InitChannel() = nil error, want error for missing env var")
-	}
-	if !strings.Contains(err.Error(), "MISSING_IMAP_USER") {
-		t.Errorf("error %q does not mention var name", err.Error())
-	}
+	t.Fatalf("enabled channels = %v, want email", m.GetEnabledChannels())
 }
 
 func TestExtractPlainText(t *testing.T) {
@@ -425,7 +421,7 @@ func TestSend_ReplyThreadingHeaders(t *testing.T) {
 			IMAPUser:       *config.NewSecureString("u"),
 			IMAPPassword:   *config.NewSecureString("p"),
 		}
-		ch, err := NewEmailChannel(cfg, bus.NewMessageBus())
+		ch, err := newTestEmailChannel(t, cfg, bus.NewMessageBus())
 		if err != nil {
 			t.Fatalf("NewEmailChannel: %v", err)
 		}
@@ -566,13 +562,13 @@ func TestSend_NewConversation_UniqueSubject(t *testing.T) {
 		IMAPPassword:   *config.NewSecureString("p"),
 	}
 
-	ch1, err := NewEmailChannel(cfg1, msgBus)
+	ch1, err := newTestEmailChannel(t, cfg1, msgBus)
 	if err != nil {
 		t.Fatalf("NewEmailChannel: %v", err)
 	}
 	ch1.SetRunning(true)
 
-	ch2, err := NewEmailChannel(cfg2, msgBus)
+	ch2, err := newTestEmailChannel(t, cfg2, msgBus)
 	if err != nil {
 		t.Fatalf("NewEmailChannel: %v", err)
 	}
@@ -670,7 +666,7 @@ func TestSend_ReplyDoesNotAddSuffix(t *testing.T) {
 		IMAPPassword:   *config.NewSecureString("p"),
 	}
 
-	ch, err := NewEmailChannel(cfg, bus.NewMessageBus())
+	ch, err := newTestEmailChannel(t, cfg, bus.NewMessageBus())
 	if err != nil {
 		t.Fatalf("NewEmailChannel: %v", err)
 	}
@@ -895,7 +891,7 @@ func TestSendMedia_WithAttachment(t *testing.T) {
 		IMAPPassword:   *config.NewSecureString("p"),
 	}
 
-	ch, err := NewEmailChannel(cfg, bus.NewMessageBus())
+	ch, err := newTestEmailChannel(t, cfg, bus.NewMessageBus())
 	if err != nil {
 		t.Fatalf("NewEmailChannel: %v", err)
 	}

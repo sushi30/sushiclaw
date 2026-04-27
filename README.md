@@ -90,8 +90,9 @@ Copy `config.example.json` to `~/.picoclaw/config.json`. Key sections:
     }
   },
   "model_list": [{ "model_name": "gpt-4o-mini", "api_key": "env://OPENAI_API_KEY" }],
-  "channels": { ... },
-  "email_channel": { ... },
+  "channels": {
+    "email": { "enabled": false, "type": "email", "...": "..." }
+  },
   "tools": { ... }
 }
 ```
@@ -183,26 +184,30 @@ Messages from senders not in `allow_from` receive a rejection reply instead of b
 
 ---
 
-### Email channel
+### Email Channel
 
-SMTP (outbound) + IMAP polling (inbound). Config lives under `email_channel` (not inside `channels`):
+SMTP (outbound) + IMAP polling (inbound). Config lives under `channels.email`.
+The legacy top-level `email_channel` key is no longer supported.
 
 ```json
 {
-  "email_channel": {
-    "enabled": true,
-    "smtp_host": "smtp.example.com",
-    "smtp_port": 587,
-    "smtp_from": "bot@example.com",
-    "smtp_user": "bot@example.com",
-    "smtp_password": "env://SMTP_PASSWORD",
-    "imap_host": "imap.example.com",
-    "imap_port": 993,
-    "imap_user": "bot@example.com",
-    "imap_password": "env://IMAP_PASSWORD",
-    "poll_interval_secs": 30,
-    "allow_from": ["trusted@example.com"],
-    "default_subject": "Re: your message"
+  "channels": {
+    "email": {
+      "enabled": true,
+      "type": "email",
+      "smtp_host": "smtp.example.com",
+      "smtp_port": 587,
+      "smtp_from": "bot@example.com",
+      "smtp_user": "bot@example.com",
+      "smtp_password": "env://SMTP_PASSWORD",
+      "imap_host": "imap.example.com",
+      "imap_port": 993,
+      "imap_user": "bot@example.com",
+      "imap_password": "env://IMAP_PASSWORD",
+      "poll_interval_secs": 30,
+      "allow_from": ["trusted@example.com"],
+      "default_subject": "Re: your message"
+    }
   }
 }
 ```
@@ -211,7 +216,7 @@ SMTP (outbound) + IMAP polling (inbound). Config lives under `email_channel` (no
 - Port 993 → implicit TLS (IMAP).
 - Processed messages are marked `\Seen`.
 
-> **Migrating from an older config?** See [RELEASE_NOTES.md](RELEASE_NOTES.md) for step-by-step instructions if your config uses the old `channels.email` format.
+> **Migrating from an older config?** See [RELEASE_NOTES.md](RELEASE_NOTES.md) for step-by-step instructions if your config uses the old top-level `email_channel` format.
 
 ---
 

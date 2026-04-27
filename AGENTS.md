@@ -38,7 +38,7 @@ the owned channel packages (whatsapp_native, telegram) to trigger their `init()`
 | `pkg/channels/` | Channel infrastructure: `BaseChannel` (shared functionality, allow-list, group triggers, typing/reaction/placeholder orchestration), `Manager` (lifecycle and outbound dispatch), registry, and capability interfaces (`StreamingCapable`, `TypingCapable`, etc.). |
 | `pkg/channels/whatsapp_native/` | Owned WhatsApp native channel (requires `whatsapp_native` build tag). |
 | `pkg/channels/telegram/` | Owned Telegram channel. |
-| `pkg/channels/email/` | Owned Email channel (SMTP outbound + IMAP polling inbound). Wired manually in `internal/gateway/` outside the standard channel registry. |
+| `pkg/channels/email/` | Owned Email channel (SMTP outbound + IMAP polling inbound). Registered through the standard channel registry. |
 | `pkg/commands/` | Slash command registry, executor, and built-in command definitions (`/help`, `/clear`, `/list models`, etc.). Supports `!` prefix in addition to `/`. |
 | `pkg/config/` | Config loading, `SecureString` (with `env://` resolution), `FlexibleStringSlice`, and path helpers. |
 | `pkg/identity/` | Sender identity matching for allow-lists. |
@@ -183,8 +183,7 @@ can report this as an error.
 |---------|-------------|
 | `agents.defaults` | Default agent settings: `model_name`, `workspace`, `restrict_to_workspace`, `max_tokens`, `temperature`, `max_tool_iterations` |
 | `model_list` | Array of model configs. Each needs `model_name`, `model` (provider ID), `api_key` (supports `env://`), optional `api_base` |
-| `channels` | Map of channel configs (WhatsApp native, Telegram). Email is **not** here — see `email_channel` |
-| `email_channel` | Top-level email config (SMTP + IMAP). See `pkg/channels/email/` |
+| `channels` | Map of channel configs (WhatsApp native, Telegram, Email). Email config lives under `channels.email`; top-level `email_channel` is no longer supported. |
 | `gateway` | `host`, `port`, `log_level` |
 | `tools` | `exec.enabled`, `media_cleanup.enabled`, `media_cleanup.max_age`, `media_cleanup.interval` |
 
@@ -289,8 +288,8 @@ The agent supports two provider paths (determined in `internal/agent/session.go`
 
 ### Email (`email`)
 
-- Wired manually in `internal/gateway/gateway.go` (not via the channel registry)
-- Config lives under top-level `email_channel` key
+- Registered through the standard channel registry
+- Config lives under `channels.email`; top-level `email_channel` is no longer supported
 - SMTP (outbound) + IMAP polling (inbound)
 - Port 465 → implicit TLS. Port 587 → STARTTLS. Port 993 → implicit TLS (IMAP).
 - Processed messages are marked `\Seen`

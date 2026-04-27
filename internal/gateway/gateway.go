@@ -14,7 +14,6 @@ import (
 	"github.com/sushi30/sushiclaw/internal/envresolve"
 	"github.com/sushi30/sushiclaw/pkg/bus"
 	"github.com/sushi30/sushiclaw/pkg/channels"
-	"github.com/sushi30/sushiclaw/pkg/channels/email"
 	"github.com/sushi30/sushiclaw/pkg/commands"
 	"github.com/sushi30/sushiclaw/pkg/config"
 	"github.com/sushi30/sushiclaw/pkg/cron"
@@ -143,14 +142,6 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 	cm, err := channels.NewManager(cfg, messageBus, mediaStore)
 	if err != nil {
 		return fmt.Errorf("error creating channel manager: %w", err)
-	}
-
-	emailCh, err := email.InitChannel(messageBus)
-	if err != nil {
-		return fmt.Errorf("email channel: %w", err)
-	}
-	if emailCh != nil {
-		cm.RegisterChannel("email", emailCh)
 	}
 
 	messageBus.SetStreamDelegate(cm)

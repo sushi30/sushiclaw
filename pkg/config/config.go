@@ -17,14 +17,13 @@ const (
 
 // Config is the top-level sushiclaw configuration.
 type Config struct {
-	Version      int            `json:"version,omitempty"`
-	Agents       AgentsConfig   `json:"agents"`
-	ModelList    []ModelConfig  `json:"model_list"`
-	Channels     ChannelsConfig `json:"channels"`
-	EmailChannel *EmailChanCfg  `json:"email_channel,omitempty"`
-	Gateway      GatewayConfig  `json:"gateway"`
-	Tools        ToolsConfig    `json:"tools"`
-	MCP          MCPConfig      `json:"mcp,omitempty"`
+	Version   int            `json:"version,omitempty"`
+	Agents    AgentsConfig   `json:"agents"`
+	ModelList []ModelConfig  `json:"model_list"`
+	Channels  ChannelsConfig `json:"channels"`
+	Gateway   GatewayConfig  `json:"gateway"`
+	Tools     ToolsConfig    `json:"tools"`
+	MCP       MCPConfig      `json:"mcp,omitempty"`
 }
 
 // MCPConfig holds MCP server configuration.
@@ -186,22 +185,19 @@ func (v VisionToolConfig) APIKeyString() string {
 	return ""
 }
 
-// EmailChanCfg is the top-level email_channel config in config.json.
-type EmailChanCfg struct {
-	Enabled            bool                `json:"enabled"`
-	SMTPHost           string              `json:"smtp_host"`
-	SMTPPort           int                 `json:"smtp_port"`
-	SMTPFrom           SecureString        `json:"smtp_from"`
-	SMTPUser           SecureString        `json:"smtp_user"`
-	SMTPPassword       SecureString        `json:"smtp_password"`
-	DefaultSubject     string              `json:"default_subject"`
-	IMAPHost           string              `json:"imap_host"`
-	IMAPPort           int                 `json:"imap_port"`
-	IMAPUser           SecureString        `json:"imap_user"`
-	IMAPPassword       SecureString        `json:"imap_password"`
-	PollIntervalSecs   int                 `json:"poll_interval_secs"`
-	AllowFrom          FlexibleStringSlice `json:"allow_from"`
-	ReasoningChannelID string              `json:"reasoning_channel_id"`
+// EmailSettings holds Email-specific channel settings.
+type EmailSettings struct {
+	SMTPHost         string       `json:"smtp_host"`
+	SMTPPort         int          `json:"smtp_port"`
+	SMTPFrom         SecureString `json:"smtp_from"`
+	SMTPUser         SecureString `json:"smtp_user"`
+	SMTPPassword     SecureString `json:"smtp_password"`
+	DefaultSubject   string       `json:"default_subject"`
+	IMAPHost         string       `json:"imap_host"`
+	IMAPPort         int          `json:"imap_port"`
+	IMAPUser         SecureString `json:"imap_user"`
+	IMAPPassword     SecureString `json:"imap_password"`
+	PollIntervalSecs int          `json:"poll_interval_secs"`
 }
 
 // GroupTriggerConfig controls when the bot responds in group chats.

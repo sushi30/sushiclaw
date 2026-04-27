@@ -24,29 +24,14 @@ import (
 	"github.com/sushi30/sushiclaw/pkg/logger"
 )
 
-// EmailConfig holds configuration for the email channel.
-// Loaded from the "channels.email" section of the picoclaw config JSON.
-type EmailConfig struct {
-	Enabled            bool                       `json:"enabled"`
-	SMTPHost           string                     `json:"smtp_host"`
-	SMTPPort           int                        `json:"smtp_port"`
-	SMTPFrom           config.SecureString        `json:"smtp_from"`
-	SMTPUser           config.SecureString        `json:"smtp_user"`
-	SMTPPassword       config.SecureString        `json:"smtp_password"`
-	DefaultSubject     string                     `json:"default_subject"`
-	IMAPHost           string                     `json:"imap_host"`
-	IMAPPort           int                        `json:"imap_port"`
-	IMAPUser           config.SecureString        `json:"imap_user"`
-	IMAPPassword       config.SecureString        `json:"imap_password"`
-	PollIntervalSecs   int                        `json:"poll_interval_secs"`
-	AllowFrom          config.FlexibleStringSlice `json:"allow_from"`
-	ReasoningChannelID string                     `json:"reasoning_channel_id"`
-}
+// EmailConfig is kept as a compatibility alias for callers that construct
+// email settings directly.
+type EmailConfig = config.EmailSettings
 
 // EmailChannel implements the Channel interface using SMTP (outbound) and IMAP polling (inbound).
 type EmailChannel struct {
 	*channels.BaseChannel
-	config          EmailConfig
+	config          config.EmailSettings
 	ctx             context.Context
 	cancel          context.CancelFunc
 	tm              *ThreadManager
@@ -55,29 +40,48 @@ type EmailChannel struct {
 }
 
 // NewEmailChannel creates a new email channel.
-func NewEmailChannel(cfg EmailConfig, messageBus *bus.MessageBus) (*EmailChannel, error) {
+func NewEmailChannel(bc *config.Channel, cfg *config.EmailSettings, messageBus *bus.MessageBus) (*EmailChannel, error) {
+	if bc == nil {
+		return nil, fmt.Errorf("email channel config is required")
+	}
+	if cfg == nil {
+		return nil, fmt.Errorf("email settings are required")
+	}
 	if cfg.SMTPHost == "" {
 		return nil, fmt.Errorf("email smtp_host is required")
 	}
-	if cfg.SMTPFrom.String() == "" {
-		return nil, fmt.Errorf("email smtp_from is required")
+	if err := requireSecureString("smtp_from", cfg.SMTPFrom); err != nil {
+		return nil, err
 	}
 	if cfg.IMAPHost == "" {
 		return nil, fmt.Errorf("email imap_host is required")
 	}
-	if cfg.IMAPUser.String() == "" {
-		return nil, fmt.Errorf("email imap_user is required")
+	if err := requireSecureString("imap_user", cfg.IMAPUser); err != nil {
+		return nil, err
+	}
+	if err := requireSecureString("imap_password", cfg.IMAPPassword); err != nil {
+		return nil, err
 	}
 
-	base := channels.NewBaseChannel("email", cfg, messageBus, cfg.AllowFrom,
-		channels.WithReasoningChannelID(cfg.ReasoningChannelID),
+	base := channels.NewBaseChannel(bc.Name(), cfg, messageBus, bc.AllowFrom,
+		channels.WithReasoningChannelID(bc.ReasoningChannelID),
 	)
 
 	return &EmailChannel{
 		BaseChannel: base,
-		config:      cfg,
+		config:      *cfg,
 		tm:          NewThreadManager(),
 	}, nil
+}
+
+func requireSecureString(name string, value config.SecureString) error {
+	if value.String() == "" {
+		return fmt.Errorf("email %s is required", name)
+	}
+	if value.IsUnresolvedEnv() {
+		return fmt.Errorf("email %s is required (unresolved: %s)", name, value.String())
+	}
+	return nil
 }
 
 // Start begins IMAP polling.

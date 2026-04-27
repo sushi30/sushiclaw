@@ -174,7 +174,7 @@ func TestEmailInboundPipeline(t *testing.T) {
 		PollIntervalSecs: 1,
 	}
 
-	ch, err := NewEmailChannel(cfg, msgBus)
+	ch, err := newTestEmailChannel(t, cfg, msgBus)
 	if err != nil {
 		t.Fatalf("NewEmailChannel: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestEmailOutboundPipeline(t *testing.T) {
 		IMAPPassword: *config.NewSecureString("p"),
 	}
 
-	ch, err := NewEmailChannel(cfg, msgBus)
+	ch, err := newTestEmailChannel(t, cfg, msgBus)
 	if err != nil {
 		t.Fatalf("NewEmailChannel: %v", err)
 	}
@@ -298,7 +298,7 @@ func TestEmailReplyThreading(t *testing.T) {
 		PollIntervalSecs: 1,
 	}
 
-	ch, err := NewEmailChannel(cfg, msgBus)
+	ch, err := newTestEmailChannel(t, cfg, msgBus)
 	if err != nil {
 		t.Fatalf("NewEmailChannel: %v", err)
 	}
@@ -389,7 +389,7 @@ func TestEmailNewEmail_ThreadReply(t *testing.T) {
 		PollIntervalSecs: 1,
 	}
 
-	ch, err := NewEmailChannel(cfg, msgBus)
+	ch, err := newTestEmailChannel(t, cfg, msgBus)
 	if err != nil {
 		t.Fatalf("NewEmailChannel: %v", err)
 	}
@@ -477,7 +477,7 @@ func TestEmailReplyChain_ThreadContinuation(t *testing.T) {
 		PollIntervalSecs: 1,
 	}
 
-	ch, err := NewEmailChannel(cfg, msgBus)
+	ch, err := newTestEmailChannel(t, cfg, msgBus)
 	if err != nil {
 		t.Fatalf("NewEmailChannel: %v", err)
 	}

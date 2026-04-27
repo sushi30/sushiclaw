@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/sushi30/sushiclaw/pkg/logger"
 	"github.com/sushi30/sushiclaw/pkg/media"
 	"github.com/sushi30/sushiclaw/pkg/tools/exec"
+	"github.com/sushi30/sushiclaw/pkg/tools/subagenttask"
 	"github.com/sushi30/sushiclaw/pkg/tools/toolctx"
 )
 
@@ -34,6 +36,7 @@ type SessionManager struct {
 	activatedSkills map[string]bool
 	progress        ProgressSink
 	mediaStore      media.MediaStore
+	subAgents       []string
 }
 
 type agentRunner interface {
@@ -52,48 +55,86 @@ func WithProgressSink(sink ProgressSink) SessionOption {
 
 // BuildAgent creates an agent-sdk-go Agent from config and tools.
 func BuildAgent(cfg *config.Config, tools []interfaces.Tool) (*agentsdk.Agent, error) {
-	return buildAgentWithMemory(cfg, tools, NewInMemoryMemory())
+	subAgents, _, err := buildConfiguredSubAgents(cfg, tools)
+	if err != nil {
+		return nil, err
+	}
+	return buildAgentWithOptions(cfg, agentOptions{
+		name:      "sushiclaw",
+		tools:     tools,
+		memory:    NewInMemoryMemory(),
+		subAgents: subAgents,
+	})
 }
 
-func buildAgentWithMemory(cfg *config.Config, tools []interfaces.Tool, mem *InMemoryMemory) (*agentsdk.Agent, error) {
+// BuildSubagent creates a sub-agent with optional overrides.
+func BuildSubagent(cfg *config.Config, name, description, modelName, systemPrompt string, tools []interfaces.Tool) (*agentsdk.Agent, error) {
+	if strings.TrimSpace(description) == "" {
+		description = fmt.Sprintf("Configured subagent %q for delegated tasks.", name)
+	}
+	return buildAgentWithOptions(cfg, agentOptions{
+		name:         name,
+		description:  description,
+		modelName:    modelName,
+		systemPrompt: systemPrompt,
+		tools:        tools,
+		memory:       NewInMemoryMemory(),
+	})
+}
+
+type agentOptions struct {
+	name         string
+	description  string
+	modelName    string
+	systemPrompt string
+	tools        []interfaces.Tool
+	memory       *InMemoryMemory
+	subAgents    []*agentsdk.Agent
+}
+
+func buildAgentWithOptions(cfg *config.Config, opts agentOptions) (*agentsdk.Agent, error) {
 	maxToolIterations := cfg.Agents.Defaults.MaxToolIterations
 	if maxToolIterations < 0 {
 		return nil, fmt.Errorf("invalid max_tool_iterations %d: must be >= 0", maxToolIterations)
 	}
 
-	llmClient, err := createLLM(cfg)
+	llmClient, err := createLLMForModel(cfg, opts.modelName)
 	if err != nil {
 		return nil, fmt.Errorf("create LLM: %w", err)
 	}
 
-	systemPrompt := "You are Sushiclaw, a helpful personal AI assistant."
-	if ws := cfg.WorkspacePath(); ws != "" {
-		cb := NewContextBuilder(ws)
-		if p, err := cb.BuildSystemPromptWithCache(); err == nil && p != "" {
-			systemPrompt = p
+	systemPrompt := opts.systemPrompt
+	if systemPrompt == "" {
+		systemPrompt = "You are Sushiclaw, a helpful personal AI assistant."
+		if ws := cfg.WorkspacePath(); ws != "" {
+			cb := NewContextBuilder(ws)
+			if p, err := cb.BuildSystemPromptWithCache(); err == nil && p != "" {
+				systemPrompt = p
+			}
 		}
 	}
 
-	toolNames := make([]string, len(tools))
+	toolNames := make([]string, len(opts.tools))
 	hasMessageTool := false
-	for i, t := range tools {
+	for i, t := range opts.tools {
 		toolNames[i] = t.Name()
 		if t.Name() == "message_tool" {
 			hasMessageTool = true
 		}
 	}
-	if len(tools) == 0 {
+	if len(opts.tools) == 0 && len(opts.subAgents) == 0 {
 		systemPrompt += "\n\nIMPORTANT: You have no tools available. You cannot execute commands, run code, or take real-world actions. If asked to do any of these, tell the user you are unable to in the current configuration — do not simulate or pretend to execute anything."
 	}
 	if hasMessageTool {
 		systemPrompt += "\n\nYou have access to message_tool. Use it to send short progress updates to the user during long-running tasks, especially when the user asked to be kept updated or when you reach a meaningful milestone. Do not overuse it; wait for meaningful progress before sending an update."
 	}
 	logger.DebugCF("agent", "Building agent", map[string]any{
+		"name":          opts.name,
 		"workspace":     cfg.WorkspacePath(),
 		"prompt_length": len(systemPrompt),
 		"tools":         toolNames,
 	})
-	for _, t := range tools {
+	for _, t := range opts.tools {
 		logger.DebugCF("agent", "Registering tool", map[string]any{
 			"name":        t.Name(),
 			"description": t.Description(),
@@ -101,22 +142,28 @@ func buildAgentWithMemory(cfg *config.Config, tools []interfaces.Tool, mem *InMe
 		})
 	}
 
-	opts := []agentsdk.Option{
-		agentsdk.WithName("sushiclaw"),
+	agentOpts := []agentsdk.Option{
+		agentsdk.WithName(opts.name),
 		agentsdk.WithLLM(llmClient),
 		agentsdk.WithSystemPrompt(systemPrompt),
-		agentsdk.WithTools(tools...),
-		agentsdk.WithMemory(mem),
+		agentsdk.WithTools(opts.tools...),
+		agentsdk.WithMemory(opts.memory),
 		agentsdk.WithRequirePlanApproval(false),
 	}
+	if opts.description != "" {
+		agentOpts = append(agentOpts, agentsdk.WithDescription(opts.description))
+	}
 	if maxToolIterations > 0 {
-		opts = append(opts, agentsdk.WithMaxIterations(maxToolIterations))
+		agentOpts = append(agentOpts, agentsdk.WithMaxIterations(maxToolIterations))
 	}
 	if mcpCfg := toAgentSDKMCPConfig(cfg.MCP); mcpCfg != nil {
-		opts = append(opts, agentsdk.WithMCPConfig(mcpCfg))
+		agentOpts = append(agentOpts, agentsdk.WithMCPConfig(mcpCfg))
+	}
+	if len(opts.subAgents) > 0 {
+		agentOpts = append(agentOpts, agentsdk.WithAgents(opts.subAgents...))
 	}
 
-	a, err := agentsdk.NewAgent(opts...)
+	a, err := agentsdk.NewAgent(agentOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("create agent: %w", err)
 	}
@@ -152,7 +199,19 @@ func toAgentSDKMCPConfig(cfg config.MCPConfig) *agentsdk.MCPConfiguration {
 // NewSessionManager creates a session manager from config.
 func NewSessionManager(cfg *config.Config, messageBus *bus.MessageBus, tools []interfaces.Tool, store media.MediaStore, opts ...SessionOption) (*SessionManager, error) {
 	mem := NewInMemoryMemory()
-	a, err := buildAgentWithMemory(cfg, tools, mem)
+
+	// Build static subagents from config without the async task tool to prevent recursion.
+	subAgents, subAgentNames, err := buildConfiguredSubAgents(cfg, tools)
+	if err != nil {
+		return nil, err
+	}
+
+	a, err := buildAgentWithOptions(cfg, agentOptions{
+		name:      "sushiclaw",
+		tools:     tools,
+		memory:    mem,
+		subAgents: subAgents,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -165,6 +224,7 @@ func NewSessionManager(cfg *config.Config, messageBus *bus.MessageBus, tools []i
 		tools:           tools,
 		activatedSkills: make(map[string]bool),
 		mediaStore:      store,
+		subAgents:       subAgentNames,
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -233,6 +293,13 @@ func (sm *SessionManager) ListSkills() []commands.SkillInfo {
 	return listSkillsInDir(filepath.Join(ws, "skills"))
 }
 
+// ListSubAgents returns the names of configured subagents.
+func (sm *SessionManager) ListSubAgents() []string {
+	out := make([]string, len(sm.subAgents))
+	copy(out, sm.subAgents)
+	return out
+}
+
 // GetModelInfo returns the configured model name and its provider.
 func (sm *SessionManager) GetModelInfo() (name, provider string) {
 	name = sm.cfg.Agents.Defaults.ModelName
@@ -291,6 +358,7 @@ func (sm *SessionManager) handleInbound(ctx context.Context, msg bus.InboundMess
 	actx := exec.WithChatID(ctx, chatID)
 	actx = toolctx.WithChannel(actx, msg.Channel)
 	actx = toolctx.WithSenderID(actx, msg.SenderID)
+	actx = subagenttask.WithContext(actx, msg.Channel, chatID, msg.Context.ReplyToMessageID)
 
 	input := msg.Content
 	if len(msg.Media) > 0 {
@@ -622,6 +690,69 @@ func createLLM(cfg *config.Config) (interfaces.LLM, error) {
 		}
 		return openai.NewClient(apiKey, opts...), nil
 	}
+}
+
+func createLLMForModel(cfg *config.Config, modelName string) (interfaces.LLM, error) {
+	if modelName == "" {
+		return createLLM(cfg)
+	}
+	cpy := *cfg
+	cpy.Agents.Defaults.ModelName = modelName
+	return createLLM(&cpy)
+}
+
+func buildConfiguredSubAgents(cfg *config.Config, tools []interfaces.Tool) ([]*agentsdk.Agent, []string, error) {
+	workspaceProfiles, err := LoadSubAgentConfigs(cfg.WorkspacePath())
+	if err != nil {
+		return nil, nil, fmt.Errorf("load workspace agents: %w", err)
+	}
+
+	profiles := MergeSubAgentConfigs(workspaceProfiles, cfg.SubAgents)
+	subAgents := make([]*agentsdk.Agent, 0, len(profiles))
+	names := make([]string, 0, len(profiles))
+
+	for name, p := range profiles {
+		agentTools := filterToolsByName(tools, p.Tools)
+		agentTools = toolsWithoutSubagentTask(agentTools)
+		sa, err := BuildSubagent(cfg, name, p.Description, p.ModelName, p.SystemPrompt, agentTools)
+		if err != nil {
+			return nil, nil, fmt.Errorf("build subagent %q: %w", name, err)
+		}
+		subAgents = append(subAgents, sa)
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return subAgents, names, nil
+}
+
+func filterToolsByName(tools []interfaces.Tool, whitelist []string) []interfaces.Tool {
+	if len(whitelist) == 0 {
+		out := make([]interfaces.Tool, len(tools))
+		copy(out, tools)
+		return out
+	}
+	allowed := make(map[string]bool, len(whitelist))
+	for _, name := range whitelist {
+		allowed[name] = true
+	}
+	out := make([]interfaces.Tool, 0, len(tools))
+	for _, t := range tools {
+		if allowed[t.Name()] {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+func toolsWithoutSubagentTask(tools []interfaces.Tool) []interfaces.Tool {
+	out := make([]interfaces.Tool, 0, len(tools))
+	for _, t := range tools {
+		if t.Name() == "subagent_task" {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
 }
 
 func truncate(s string, maxLen int) string {

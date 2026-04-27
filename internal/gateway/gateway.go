@@ -82,7 +82,7 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 	defer mediaStore.Stop()
 
 	allowedSenders := sushitools.ParseAllowedSenders()
-	tools, err := sushitools.NewGatewayTools(cfg, allowedSenders, mediaStore, messageBus)
+	tools, err := sushitools.NewGatewayTools(cfg, allowedSenders, mediaStore)
 	if err != nil {
 		logger.WarnCF("gateway", "Failed to init trusted exec tool",
 			map[string]any{"error": err.Error()})
@@ -103,6 +103,10 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 				map[string]any{"provider": cfg.Tools.WebSearch.Provider})
 		}
 	}
+
+	workspaceProfiles, _ := agent.LoadSubAgentConfigs(cfg.WorkspacePath())
+	profiles := agent.MergeSubAgentConfigs(workspaceProfiles, cfg.SubAgents)
+	tools = sushitools.MaybeAppendSubagentTaskTool(tools, cfg, messageBus, agent.BuildSubagent, profiles)
 
 	var cronScheduler *cron.Scheduler
 	if cfg.Tools.Cron.Enabled {
@@ -179,6 +183,7 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 		rt.ListModels = sessionMgr.ListModels
 		rt.ListSkills = sessionMgr.ListSkills
 		rt.ActivateSkill = sessionMgr.ActivateSkill
+		rt.ListSubAgents = sessionMgr.ListSubAgents
 	}
 	executor := commands.NewExecutor(reg, rt)
 

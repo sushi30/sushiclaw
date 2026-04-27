@@ -66,6 +66,7 @@ type Runtime struct {
 	ListModels      func() []string
 	ListSkills      func() []SkillInfo
 	ListCronJobs    func() (string, error)
+	ListSubAgents   func() []string
 	ClearHistory    func() error
 	SetDebug        func(ctx context.Context, channel, chatID, mode string) string
 	ActivateSkill   func(skillName string) error
@@ -269,7 +270,7 @@ func BuiltinDefinitions() []Definition {
 		{Name: "btw", Description: "Add a note to conversation context"},
 		{Name: "switch", Description: "Switch model or channel"},
 		{Name: "check", Description: "Check system status"},
-		{Name: "subagents", Description: "Manage subagents"},
+		{Name: "subagents", Description: "Manage subagents", Handler: subagentsHandler},
 		{Name: "reload", Description: "Reload configuration"},
 	}
 }
@@ -340,17 +341,6 @@ func listSkillsHandler(_ context.Context, req Request, rt *Runtime) error {
 	return req.Reply(strings.TrimRight(sb.String(), "\n"))
 }
 
-func listCronHandler(_ context.Context, req Request, rt *Runtime) error {
-	if rt == nil || rt.ListCronJobs == nil {
-		return req.Reply("Cron job list unavailable.")
-	}
-	jobs, err := rt.ListCronJobs()
-	if err != nil {
-		return req.Reply("Failed to list cron jobs: " + err.Error())
-	}
-	return req.Reply(jobs)
-}
-
 func clearHandler(_ context.Context, req Request, rt *Runtime) error {
 	if rt != nil && rt.ClearHistory != nil {
 		if err := rt.ClearHistory(); err != nil {
@@ -390,6 +380,17 @@ func debugHandler(ctx context.Context, req Request, rt *Runtime) error {
 	return req.Reply(reply)
 }
 
+func listCronHandler(_ context.Context, req Request, rt *Runtime) error {
+	if rt == nil || rt.ListCronJobs == nil {
+		return req.Reply("Cron job list unavailable.")
+	}
+	jobs, err := rt.ListCronJobs()
+	if err != nil {
+		return req.Reply("Failed to list cron jobs: " + err.Error())
+	}
+	return req.Reply(jobs)
+}
+
 // ErrSkillAlreadyLoaded is returned when a skill is already active in the session.
 var ErrSkillAlreadyLoaded = errors.New("skill already loaded")
 
@@ -408,4 +409,20 @@ func useHandler(_ context.Context, req Request, rt *Runtime) error {
 		return req.Reply(fmt.Sprintf("Failed to activate skill: %v", err))
 	}
 	return req.Reply(fmt.Sprintf("Skill %s activated.", skillName))
+}
+
+func subagentsHandler(_ context.Context, req Request, rt *Runtime) error {
+	if rt == nil || rt.ListSubAgents == nil {
+		return req.Reply("Subagent list unavailable.")
+	}
+	agents := rt.ListSubAgents()
+	if len(agents) == 0 {
+		return req.Reply("No subagents configured.")
+	}
+	var sb strings.Builder
+	sb.WriteString("Configured subagents:\n")
+	for _, name := range agents {
+		sb.WriteString("• " + name + "\n")
+	}
+	return req.Reply(strings.TrimRight(sb.String(), "\n"))
 }

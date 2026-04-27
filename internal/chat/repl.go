@@ -12,6 +12,7 @@ import (
 	agentsdk "github.com/Ingenimax/agent-sdk-go/pkg/agent"
 
 	"github.com/sushi30/sushiclaw/internal/agent"
+	"github.com/sushi30/sushiclaw/pkg/bus"
 	"github.com/sushi30/sushiclaw/pkg/config"
 	sushitools "github.com/sushi30/sushiclaw/pkg/tools"
 	"github.com/sushi30/sushiclaw/pkg/tools/exec"
@@ -31,16 +32,38 @@ type Runner struct {
 func NewRunner(cfg *config.Config) (*Runner, error) {
 	tools := sushitools.NewChatTools(cfg)
 
+	// Create a local message bus so async subagent tasks can publish results
+	// back to the terminal.
+	messageBus := bus.NewMessageBus()
+	workspaceProfiles, _ := agent.LoadSubAgentConfigs(cfg.WorkspacePath())
+	profiles := agent.MergeSubAgentConfigs(workspaceProfiles, cfg.SubAgents)
+	tools = sushitools.MaybeAppendSubagentTaskTool(tools, cfg, messageBus, agent.BuildSubagent, profiles)
+
 	agentsdkAgent, err := agent.BuildAgent(cfg, tools)
 	if err != nil {
 		return nil, fmt.Errorf("build agent: %w", err)
 	}
 
-	return &Runner{
+	r := &Runner{
 		agent:   agentsdkAgent,
 		scanner: bufio.NewScanner(os.Stdin),
 		out:     os.Stdout,
-	}, nil
+	}
+
+	// Start a background goroutine to print async subagent results.
+	go r.consumeOutbound(messageBus)
+
+	return r, nil
+}
+
+// consumeOutbound prints messages published to the bus by async subagent tasks.
+func (r *Runner) consumeOutbound(messageBus *bus.MessageBus) {
+	for msg := range messageBus.OutboundChan() {
+		_, _ = fmt.Fprintln(r.out)
+		_, _ = fmt.Fprintln(r.out, "[async result]")
+		_, _ = fmt.Fprintln(r.out, msg.Content)
+		_, _ = fmt.Fprint(r.out, "> ")
+	}
 }
 
 // Run starts the REPL loop.

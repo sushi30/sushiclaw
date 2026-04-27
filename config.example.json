@@ -103,10 +103,6 @@
       "model_name": "gpt-4o-mini",
       "prompt": "Describe this image in detail."
     },
-    "message": {
-      "enabled": true,
-      "min_interval_seconds": 5
-    },
     "media_cleanup": {
       "enabled": true,
       "max_age": 30,
@@ -119,6 +115,9 @@
       "enabled": true
     },
     "list_dir": {
+      "enabled": true
+    },
+    "subagent_task": {
       "enabled": true
     }
   },

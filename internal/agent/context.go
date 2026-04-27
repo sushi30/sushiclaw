@@ -66,7 +66,7 @@ func (b *ContextBuilder) buildPrompt() (string, error) {
 
 	agentBody, agentOK := b.readFileIfExists(filepath.Join(b.workspace, "AGENT.md"))
 	if agentOK {
-		if body := parseMarkdownBody(agentBody); body != "" {
+		if body := ParseMarkdownBody(agentBody); body != "" {
 			sections = append(sections, body)
 		}
 	}
@@ -213,9 +213,9 @@ func (b *ContextBuilder) readFileIfExists(path string) (string, bool) {
 	return strings.TrimSpace(string(data)), true
 }
 
-// parseMarkdownBody strips YAML frontmatter (--- ... ---) from markdown content
+// ParseMarkdownBody strips YAML frontmatter (--- ... ---) from markdown content
 // and returns only the body.
-func parseMarkdownBody(content string) string {
+func ParseMarkdownBody(content string) string {
 	content = strings.TrimSpace(content)
 	if !strings.HasPrefix(content, "---") {
 		return content
@@ -261,7 +261,7 @@ func frontmatterDescription(content string) string {
 // firstDescriptionLine returns the first non-blank, non-frontmatter line from
 // a SKILL.md file suitable for use as a one-line description.
 func firstDescriptionLine(content string) string {
-	body := parseMarkdownBody(content)
+	body := ParseMarkdownBody(content)
 	for _, line := range strings.Split(body, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {

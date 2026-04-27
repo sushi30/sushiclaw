@@ -247,6 +247,41 @@ func TestNewSessionManager_ToolsRegistered(t *testing.T) {
 	assert.Equal(t, []string{"test-tool"}, sm.ToolNames())
 }
 
+func TestNewSessionManager_ListSubAgentsSorted(t *testing.T) {
+	cfg := newAgentTestConfig()
+	cfg.SubAgents = map[string]config.SubAgentConfig{
+		"researcher": {Description: "Research tasks"},
+		"coder":      {Description: "Code tasks"},
+	}
+
+	sm, err := agent.NewSessionManager(cfg, nil, nil, nil)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"coder", "researcher"}, sm.ListSubAgents())
+}
+
+func TestBuildSubagent_PassesDescription(t *testing.T) {
+	cfg := newAgentTestConfig()
+
+	sub, err := agent.BuildSubagent(cfg, "coder", "Writes and reviews code", "", "Code carefully.", nil)
+	require.NoError(t, err)
+
+	assert.Equal(t, "coder", sub.GetName())
+	assert.Equal(t, "Writes and reviews code", sub.GetDescription())
+}
+
+func TestBuildAgent_RegistersSDKSubagentTools(t *testing.T) {
+	cfg := newAgentTestConfig()
+	cfg.SubAgents = map[string]config.SubAgentConfig{
+		"coder": {Description: "Writes and reviews code"},
+	}
+
+	a, err := agent.BuildAgent(cfg, nil)
+	require.NoError(t, err)
+
+	assert.Contains(t, sdkToolNames(a), "coder_agent")
+}
+
 func TestBuildAgent_WithMCPConfig(t *testing.T) {
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -277,6 +312,30 @@ func TestBuildAgent_WithMCPConfig(t *testing.T) {
 	// initialization so no actual server connection is attempted.
 	_, err := agent.BuildAgent(cfg, nil)
 	require.NoError(t, err, "expected BuildAgent to succeed with MCP config")
+}
+
+func newAgentTestConfig() *config.Config {
+	return &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{ModelName: "test-model"},
+		},
+		ModelList: []config.ModelConfig{
+			{
+				ModelName: "test-model",
+				Model:     "gpt-4o",
+				APIKey:    config.NewSecureString("test-key"),
+			},
+		},
+	}
+}
+
+func sdkToolNames(a *agentsdk.Agent) []string {
+	tools := a.GetTools()
+	names := make([]string, len(tools))
+	for i, tool := range tools {
+		names[i] = tool.Name()
+	}
+	return names
 }
 
 func TestSessionManager_ActivateSkill(t *testing.T) {

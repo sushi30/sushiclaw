@@ -7,10 +7,13 @@ import (
 	"github.com/sushi30/sushiclaw/pkg/media"
 	"github.com/sushi30/sushiclaw/pkg/tools/exec"
 	fstools "github.com/sushi30/sushiclaw/pkg/tools/fs"
-	"github.com/sushi30/sushiclaw/pkg/tools/message"
+	"github.com/sushi30/sushiclaw/pkg/tools/subagenttask"
 	"github.com/sushi30/sushiclaw/pkg/tools/vision"
 	"github.com/sushi30/sushiclaw/pkg/tools/websearch"
 )
+
+// SubAgentFactory is the constructor signature for a sub-agent factory.
+type SubAgentFactory = subagenttask.SubAgentFactory
 
 // NewChatTools returns tools available to the local terminal chat.
 func NewChatTools(cfg *config.Config) []interfaces.Tool {
@@ -32,7 +35,7 @@ func NewChatTools(cfg *config.Config) []interfaces.Tool {
 }
 
 // NewGatewayTools returns tools available to remote gateway sessions.
-func NewGatewayTools(cfg *config.Config, execAllowedSenders []string, store media.MediaStore, messageBus *bus.MessageBus) ([]interfaces.Tool, error) {
+func NewGatewayTools(cfg *config.Config, execAllowedSenders []string, store media.MediaStore) ([]interfaces.Tool, error) {
 	out := newFileTools(cfg)
 	if cfg.Tools.IsToolEnabled("exec") && len(execAllowedSenders) > 0 {
 		trustedExec, err := NewTrustedExecTool(cfg, workspacePath(cfg), restrictToWorkspace(cfg), execAllowedSenders)
@@ -45,9 +48,6 @@ func NewGatewayTools(cfg *config.Config, execAllowedSenders []string, store medi
 		if tool, err := vision.NewTool(cfg.Tools.Vision, visionModel(cfg), store); err == nil {
 			out = append(out, tool)
 		}
-	}
-	if cfg.Tools.IsToolEnabled("message") && messageBus != nil {
-		out = append(out, message.NewTool(messageBus, cfg.Tools.Message.MinInterval))
 	}
 	return out, nil
 }
@@ -107,4 +107,27 @@ func visionModel(cfg *config.Config) *config.ModelConfig {
 		}
 	}
 	return nil
+}
+
+// ToolsWithoutSubagentTask returns a copy of the tool slice with the async
+// subagent task tool removed. Use this when building sub-agents to prevent
+// recursive background task spawning.
+func ToolsWithoutSubagentTask(tools []interfaces.Tool) []interfaces.Tool {
+	out := make([]interfaces.Tool, 0, len(tools))
+	for _, t := range tools {
+		if t.Name() == "subagent_task" {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
+}
+
+// MaybeAppendSubagentTaskTool appends the async subagent task tool if enabled.
+// profiles is a map of loaded subagent configurations (workspace + config merged).
+func MaybeAppendSubagentTaskTool(tools []interfaces.Tool, cfg *config.Config, messageBus *bus.MessageBus, factory SubAgentFactory, profiles map[string]config.SubAgentConfig) []interfaces.Tool {
+	if cfg == nil || !cfg.Tools.IsToolEnabled("subagent_task") || len(profiles) == 0 {
+		return tools
+	}
+	return append(tools, subagenttask.NewTool(cfg, messageBus, ToolsWithoutSubagentTask(tools), factory, profiles))
 }

@@ -17,13 +17,15 @@ const (
 
 // Config is the top-level sushiclaw configuration.
 type Config struct {
-	Version   int            `json:"version,omitempty"`
-	Agents    AgentsConfig   `json:"agents"`
-	ModelList []ModelConfig  `json:"model_list"`
-	Channels  ChannelsConfig `json:"channels"`
-	Gateway   GatewayConfig  `json:"gateway"`
-	Tools     ToolsConfig    `json:"tools"`
-	MCP       MCPConfig      `json:"mcp,omitempty"`
+	Version      int                       `json:"version,omitempty"`
+	Agents       AgentsConfig              `json:"agents"`
+	ModelList    []ModelConfig             `json:"model_list"`
+	Channels     ChannelsConfig            `json:"channels"`
+	EmailChannel *EmailChanCfg             `json:"email_channel,omitempty"`
+	Gateway      GatewayConfig             `json:"gateway"`
+	Tools        ToolsConfig               `json:"tools"`
+	MCP          MCPConfig                 `json:"mcp,omitempty"`
+	SubAgents    map[string]SubAgentConfig `json:"subagents,omitempty"`
 }
 
 // MCPConfig holds MCP server configuration.
@@ -91,7 +93,7 @@ type ToolsConfig struct {
 	ListDir      ToolConfig          `json:"list_dir"`
 	WebSearch    WebSearchToolConfig `json:"web_search"`
 	Vision       VisionToolConfig    `json:"vision"`
-	Message      MessageToolConfig   `json:"message"`
+	SubagentTask ToolConfig          `json:"subagent_task"`
 }
 
 func (t ToolsConfig) IsToolEnabled(name string) bool {
@@ -110,10 +112,18 @@ func (t ToolsConfig) IsToolEnabled(name string) bool {
 		return t.WebSearch.Enabled
 	case "vision":
 		return t.Vision.Enabled
-	case "message":
-		return t.Message.Enabled
+	case "subagent_task":
+		return t.SubagentTask.Enabled
 	}
 	return false
+}
+
+// SubAgentConfig holds configuration for a named subagent profile.
+type SubAgentConfig struct {
+	ModelName    string   `json:"model_name,omitempty"`
+	Description  string   `json:"description,omitempty"`
+	SystemPrompt string   `json:"system_prompt,omitempty"`
+	Tools        []string `json:"tools,omitempty"`
 }
 
 type ToolConfig struct {
@@ -180,11 +190,6 @@ type VisionToolConfig struct {
 	Prompt    string        `json:"prompt,omitempty"`
 }
 
-type MessageToolConfig struct {
-	Enabled     bool `json:"enabled"`
-	MinInterval int  `json:"min_interval_seconds,omitempty"`
-}
-
 // APIKeyString returns the resolved API key.
 func (v VisionToolConfig) APIKeyString() string {
 	if v.APIKey != nil {
@@ -206,6 +211,24 @@ type EmailSettings struct {
 	IMAPUser         SecureString `json:"imap_user"`
 	IMAPPassword     SecureString `json:"imap_password"`
 	PollIntervalSecs int          `json:"poll_interval_secs"`
+}
+
+// EmailChanCfg is the top-level email_channel config in config.json.
+type EmailChanCfg struct {
+	Enabled            bool                `json:"enabled"`
+	SMTPHost           string              `json:"smtp_host"`
+	SMTPPort           int                 `json:"smtp_port"`
+	SMTPFrom           SecureString        `json:"smtp_from"`
+	SMTPUser           SecureString        `json:"smtp_user"`
+	SMTPPassword       SecureString        `json:"smtp_password"`
+	DefaultSubject     string              `json:"default_subject"`
+	IMAPHost           string              `json:"imap_host"`
+	IMAPPort           int                 `json:"imap_port"`
+	IMAPUser           SecureString        `json:"imap_user"`
+	IMAPPassword       SecureString        `json:"imap_password"`
+	PollIntervalSecs   int                 `json:"poll_interval_secs"`
+	AllowFrom          FlexibleStringSlice `json:"allow_from"`
+	ReasoningChannelID string              `json:"reasoning_channel_id"`
 }
 
 // GroupTriggerConfig controls when the bot responds in group chats.

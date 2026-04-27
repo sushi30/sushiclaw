@@ -13,7 +13,12 @@ const (
 	ChannelTelegram       = "telegram"
 	ChannelWhatsAppNative = "whatsapp_native"
 	ChannelEmail          = "email"
+	ChannelWebSocket       = "websocket"
+	ChannelWebSocketClient = "websocket_client"
 )
+
+// DefaultMaxMediaSize is the maximum allowed inline media payload size (20 MB).
+const DefaultMaxMediaSize = 20 * 1024 * 1024
 
 // Config is the top-level sushiclaw configuration.
 type Config struct {
@@ -249,6 +254,37 @@ type WhatsAppSettings struct {
 	BridgeURL        string `json:"bridge_url"`
 	UseNative        bool   `json:"use_native"`
 	SessionStorePath string `json:"session_store_path"`
+}
+
+// WebSocketSettings holds Pico Protocol server channel settings.
+type WebSocketSettings struct {
+	Token           SecureString `json:"token,omitzero"`
+	AllowTokenQuery bool         `json:"allow_token_query,omitempty"`
+	AllowOrigins    []string     `json:"allow_origins,omitempty"`
+	PingInterval    int          `json:"ping_interval,omitempty"`
+	ReadTimeout     int          `json:"read_timeout,omitempty"`
+	WriteTimeout    int          `json:"write_timeout,omitempty"`
+	MaxConnections  int          `json:"max_connections,omitempty"`
+	Port            int          `json:"port,omitempty"`
+}
+
+// SetToken sets the Pico token.
+func (c *WebSocketSettings) SetToken(token string) {
+	c.Token = *NewSecureString(token)
+}
+
+// WebSocketClientSettings holds Pico Protocol client channel settings.
+type WebSocketClientSettings struct {
+	URL          string       `json:"url"`
+	Token        SecureString `json:"token,omitzero"`
+	SessionID    string       `json:"session_id,omitempty"`
+	PingInterval int          `json:"ping_interval,omitempty"`
+	ReadTimeout  int          `json:"read_timeout,omitempty"`
+}
+
+// SetToken sets the Pico client token.
+func (c *WebSocketClientSettings) SetToken(token string) {
+	c.Token = *NewSecureString(token)
 }
 
 // VoiceConfig holds voice/ASR settings.

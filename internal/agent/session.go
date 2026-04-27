@@ -19,6 +19,7 @@ import (
 	"github.com/sushi30/sushiclaw/pkg/config"
 	"github.com/sushi30/sushiclaw/pkg/llm/openrouter"
 	"github.com/sushi30/sushiclaw/pkg/logger"
+	"github.com/sushi30/sushiclaw/pkg/media"
 	"github.com/sushi30/sushiclaw/pkg/tools/exec"
 	"github.com/sushi30/sushiclaw/pkg/tools/toolctx"
 )
@@ -32,6 +33,7 @@ type SessionManager struct {
 	tools           []interfaces.Tool
 	activatedSkills map[string]bool
 	progress        ProgressSink
+	mediaStore      media.MediaStore
 }
 
 type agentRunner interface {
@@ -141,7 +143,7 @@ func toAgentSDKMCPConfig(cfg config.MCPConfig) *agentsdk.MCPConfiguration {
 }
 
 // NewSessionManager creates a session manager from config.
-func NewSessionManager(cfg *config.Config, messageBus *bus.MessageBus, tools []interfaces.Tool, opts ...SessionOption) (*SessionManager, error) {
+func NewSessionManager(cfg *config.Config, messageBus *bus.MessageBus, tools []interfaces.Tool, store media.MediaStore, opts ...SessionOption) (*SessionManager, error) {
 	mem := NewInMemoryMemory()
 	a, err := buildAgentWithMemory(cfg, tools, mem)
 	if err != nil {
@@ -155,6 +157,7 @@ func NewSessionManager(cfg *config.Config, messageBus *bus.MessageBus, tools []i
 		cfg:             cfg,
 		tools:           tools,
 		activatedSkills: make(map[string]bool),
+		mediaStore:      store,
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -283,8 +286,23 @@ func (sm *SessionManager) handleInbound(ctx context.Context, msg bus.InboundMess
 	actx = toolctx.WithSenderID(actx, msg.SenderID)
 
 	input := msg.Content
-	if input == "" && len(msg.Media) > 0 {
-		input = fmt.Sprintf("[media attachments: %v]", msg.Media)
+	if len(msg.Media) > 0 {
+		paths := make([]string, 0, len(msg.Media))
+		for _, ref := range msg.Media {
+			if sm.mediaStore != nil && strings.HasPrefix(ref, "media://") {
+				if p, err := sm.mediaStore.Resolve(ref); err == nil {
+					paths = append(paths, p)
+					continue
+				}
+			}
+			paths = append(paths, ref)
+		}
+		mediaDesc := fmt.Sprintf("[attached files: %v]", paths)
+		if input == "" {
+			input = mediaDesc
+		} else {
+			input = input + "\n\n" + mediaDesc
+		}
 	}
 
 	logger.DebugCF("agent", "Processing message", map[string]any{

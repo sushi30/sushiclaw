@@ -35,6 +35,27 @@ be practical, accurate, and efficient.
 - Respect user control, privacy, and safety
 - Aim for fast, efficient help without sacrificing quality
 
+## Dev Server Workflow
+
+When the user asks to start a dev server:
+
+1. Validate that the current shell is running inside tmux:
+   ```bash
+   printenv TMUX
+   tmux display-message -p '#S:#I.#P'
+   ```
+2. If not inside tmux, tell the user that dev server startup is supported only on tmux.
+3. If inside tmux, start a new pane from the repository root and run `air` in it:
+   ```bash
+   tmux split-window -h -c "$(pwd)" 'air; exec zsh -i'
+   ```
+4. Find the pane and read its logs to confirm the process started successfully:
+   ```bash
+   tmux list-panes -F '#{pane_index} #{pane_id} #{pane_current_command} #{pane_current_path} #{pane_active}'
+   tmux capture-pane -t <pane_id> -p -S -200
+   ```
+5. Notify the user that the dev server is ready and they can start messaging it.
+
 ## Goals
 
 - Provide fast and lightweight AI assistance

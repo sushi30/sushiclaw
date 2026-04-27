@@ -91,6 +91,7 @@ type ToolsConfig struct {
 	WriteFile    ToolConfig          `json:"write_file"`
 	ListDir      ToolConfig          `json:"list_dir"`
 	WebSearch    WebSearchToolConfig `json:"web_search"`
+	Vision       VisionToolConfig    `json:"vision"`
 }
 
 func (t ToolsConfig) IsToolEnabled(name string) bool {
@@ -107,6 +108,8 @@ func (t ToolsConfig) IsToolEnabled(name string) bool {
 		return t.ListDir.Enabled
 	case "web_search":
 		return t.WebSearch.Enabled
+	case "vision":
+		return t.Vision.Enabled
 	}
 	return false
 }
@@ -164,6 +167,23 @@ type TavilySearchConfig struct {
 type BaiduSearchConfig struct {
 	Enabled bool          `json:"enabled"`
 	APIKey  *SecureString `json:"api_key,omitzero"`
+}
+
+type VisionToolConfig struct {
+	Enabled   bool          `json:"enabled"`
+	ModelName string        `json:"model_name,omitempty"`
+	Model     string        `json:"model"`
+	APIKey    *SecureString `json:"api_key,omitzero"`
+	APIBase   string        `json:"api_base,omitempty"`
+	Prompt    string        `json:"prompt,omitempty"`
+}
+
+// APIKeyString returns the resolved API key.
+func (v VisionToolConfig) APIKeyString() string {
+	if v.APIKey != nil {
+		return v.APIKey.String()
+	}
+	return ""
 }
 
 // EmailChanCfg is the top-level email_channel config in config.json.

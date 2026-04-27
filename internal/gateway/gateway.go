@@ -74,8 +74,16 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 		ListDefinitions: reg.Definitions,
 	}
 
+	mediaStore := media.NewFileMediaStoreWithCleanup(media.MediaCleanerConfig{
+		Enabled:  cfg.Tools.MediaCleanup.Enabled,
+		MaxAge:   time.Duration(cfg.Tools.MediaCleanup.MaxAge) * time.Minute,
+		Interval: time.Duration(cfg.Tools.MediaCleanup.Interval) * time.Minute,
+	})
+	mediaStore.Start()
+	defer mediaStore.Stop()
+
 	allowedSenders := sushitools.ParseAllowedSenders()
-	tools, err := sushitools.NewGatewayTools(cfg, allowedSenders)
+	tools, err := sushitools.NewGatewayTools(cfg, allowedSenders, mediaStore)
 	if err != nil {
 		logger.WarnCF("gateway", "Failed to init trusted exec tool",
 			map[string]any{"error": err.Error()})
@@ -118,7 +126,12 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 		logger.InfoC("gateway", "Cron tool registered")
 	}
 
-	sessionMgr, err := agent.NewSessionManager(cfg, messageBus, tools, agent.WithProgressSink(dm))
+	if cfg.Tools.IsToolEnabled("vision") {
+		logger.InfoCF("gateway", "Vision tool registered",
+			map[string]any{"model": cfg.Tools.Vision.Model})
+	}
+
+	sessionMgr, err := agent.NewSessionManager(cfg, messageBus, tools, mediaStore, agent.WithProgressSink(dm))
 	if err != nil {
 		if allowEmptyStartup {
 			logger.WarnC("gateway", fmt.Sprintf("Failed to create agent session: %v", err))
@@ -126,14 +139,6 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 			return fmt.Errorf("error creating agent session: %w", err)
 		}
 	}
-
-	mediaStore := media.NewFileMediaStoreWithCleanup(media.MediaCleanerConfig{
-		Enabled:  cfg.Tools.MediaCleanup.Enabled,
-		MaxAge:   time.Duration(cfg.Tools.MediaCleanup.MaxAge) * time.Minute,
-		Interval: time.Duration(cfg.Tools.MediaCleanup.Interval) * time.Minute,
-	})
-	mediaStore.Start()
-	defer mediaStore.Stop()
 
 	cm, err := channels.NewManager(cfg, messageBus, mediaStore)
 	if err != nil {

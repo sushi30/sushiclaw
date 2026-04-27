@@ -28,7 +28,7 @@ func TestNewGatewayTools_RegistersFileToolsWithoutExecAllowlist(t *testing.T) {
 	cfg.Tools.ReadFile.Enabled = true
 	cfg.Tools.ListDir.Enabled = true
 
-	built, err := tools.NewGatewayTools(cfg, nil)
+	built, err := tools.NewGatewayTools(cfg, nil, nil)
 	if err != nil {
 		t.Fatalf("NewGatewayTools: %v", err)
 	}
@@ -44,13 +44,39 @@ func TestNewGatewayTools_RegistersTrustedExecWithAllowlist(t *testing.T) {
 	cfg := newToolsConfig(t)
 	cfg.Tools.Exec.Enabled = true
 
-	built, err := tools.NewGatewayTools(cfg, []string{"chat-1"})
+	built, err := tools.NewGatewayTools(cfg, []string{"chat-1"}, nil)
 	if err != nil {
 		t.Fatalf("NewGatewayTools: %v", err)
 	}
 
 	got := toolNames(built)
 	want := []string{"exec"}
+	if !equalStrings(got, want) {
+		t.Fatalf("tool names = %v, want %v", got, want)
+	}
+}
+
+func TestNewGatewayTools_RegistersVisionFromModelListReference(t *testing.T) {
+	cfg := newToolsConfig(t)
+	cfg.Agents.Defaults.ModelName = "text-model"
+	cfg.ModelList = []config.ModelConfig{
+		{ModelName: "text-model", Model: "openrouter/z-ai/glm-4.5"},
+		{
+			ModelName: "vision-model",
+			Model:     "openrouter/z-ai/glm-5v-turbo",
+			APIKey:    config.NewSecureString("test-key"),
+		},
+	}
+	cfg.Tools.Vision.Enabled = true
+	cfg.Tools.Vision.ModelName = "vision-model"
+
+	built, err := tools.NewGatewayTools(cfg, nil, nil)
+	if err != nil {
+		t.Fatalf("NewGatewayTools: %v", err)
+	}
+
+	got := toolNames(built)
+	want := []string{"vision"}
 	if !equalStrings(got, want) {
 		t.Fatalf("tool names = %v, want %v", got, want)
 	}

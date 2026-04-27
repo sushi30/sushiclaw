@@ -247,6 +247,186 @@ func (c *EmailChannel) Send(ctx context.Context, msg bus.OutboundMessage) ([]str
 	return nil, nil
 }
 
+// SendMedia implements the channels.MediaSender interface for sending attachments.
+func (c *EmailChannel) SendMedia(ctx context.Context, msg bus.OutboundMediaMessage) ([]string, error) {
+	if !c.IsRunning() {
+		return nil, channels.ErrNotRunning
+	}
+
+	to := msg.ChatID
+	if to == "" {
+		return nil, fmt.Errorf("chat ID (recipient address) is empty: %w", channels.ErrSendFailed)
+	}
+	if len(msg.Parts) == 0 {
+		return nil, nil
+	}
+
+	attachments, err := newEmailMediaHandler(c.GetMediaStore()).outboundAttachments(msg.Parts)
+	if err != nil {
+		return nil, err
+	}
+
+	// Use the first non-empty caption as the email body.
+	var body string
+	for _, part := range msg.Parts {
+		if part.Caption != "" {
+			body = part.Caption
+			break
+		}
+	}
+	return nil, c.sendMultipartEmail(ctx, to, body, msg.Context.ReplyToMessageID, attachments)
+}
+
+// sendMultipartEmail builds and sends a multipart MIME message with HTML body and attachments.
+func (c *EmailChannel) sendMultipartEmail(ctx context.Context, to, content, replyToID string, attachments []attachmentInfo) error {
+	subject := c.config.DefaultSubject
+	if subject == "" {
+		subject = "Message"
+	}
+
+	outboundMsgID := generateMessageID(extractDomain(c.config.SMTPFrom.String()))
+	outboundMsgIDRaw := strings.Trim(outboundMsgID, "<>")
+
+	if replyToID == "" {
+		if v, ok := c.lastMsgByChatID.Load(to); ok {
+			replyToID = v.(string)
+		}
+	}
+
+	var ancestorRefs []string
+	if replyToID != "" {
+		c.tmMu.RLock()
+		node, hasNode := c.tm.AllMessages[replyToID]
+		if hasNode {
+			ancestorRefs = c.tm.ReferencesChain(replyToID)
+			if !node.IsGhost && node.Subject != "" {
+				subject = "Re: " + node.Subject
+			}
+		}
+		c.tmMu.RUnlock()
+	}
+
+	if replyToID == "" && len(outboundMsgIDRaw) >= 8 {
+		subject = fmt.Sprintf("%s [%s]", subject, outboundMsgIDRaw[:8])
+	}
+
+	var h gomail.Header
+	h.SetAddressList("From", []*gomail.Address{{Address: c.config.SMTPFrom.String()}})
+	h.SetAddressList("To", []*gomail.Address{{Address: to}})
+	h.SetSubject(subject)
+	h.SetDate(time.Now())
+	h.SetMessageID(outboundMsgIDRaw)
+
+	if replyToID != "" {
+		h.SetMsgIDList("In-Reply-To", []string{replyToID})
+		allRefs := append(ancestorRefs, replyToID)
+		h.SetMsgIDList("References", allRefs)
+	}
+
+	var bodyBuf bytes.Buffer
+	w, err := gomail.CreateWriter(&bodyBuf, h)
+	if err != nil {
+		return fmt.Errorf("create mime writer: %w: %w", err, channels.ErrSendFailed)
+	}
+
+	// Write HTML body part
+	if strings.TrimSpace(content) != "" {
+		var inlineH gomail.InlineHeader
+		inlineH.SetContentType("text/html", map[string]string{"charset": "utf-8"})
+		inlineW, err := w.CreateSingleInline(inlineH)
+		if err != nil {
+			_ = w.Close()
+			return fmt.Errorf("create inline writer: %w: %w", err, channels.ErrSendFailed)
+		}
+		if _, err := inlineW.Write([]byte(markdownToHTML(content))); err != nil {
+			_ = inlineW.Close()
+			_ = w.Close()
+			return fmt.Errorf("write html body: %w: %w", err, channels.ErrSendFailed)
+		}
+		if err := inlineW.Close(); err != nil {
+			_ = w.Close()
+			return fmt.Errorf("close inline writer: %w: %w", err, channels.ErrSendFailed)
+		}
+	}
+
+	// Write attachment parts
+	for _, att := range attachments {
+		var attH gomail.AttachmentHeader
+		attH.SetFilename(att.filename)
+		attH.SetContentType(att.contentType, map[string]string{})
+		attW, err := w.CreateAttachment(attH)
+		if err != nil {
+			_ = w.Close()
+			return fmt.Errorf("create attachment writer: %w: %w", err, channels.ErrSendFailed)
+		}
+		if _, err := attW.Write(att.data); err != nil {
+			_ = attW.Close()
+			_ = w.Close()
+			return fmt.Errorf("write attachment: %w: %w", err, channels.ErrSendFailed)
+		}
+		if err := attW.Close(); err != nil {
+			_ = w.Close()
+			return fmt.Errorf("close attachment writer: %w: %w", err, channels.ErrSendFailed)
+		}
+	}
+
+	if err := w.Close(); err != nil {
+		return fmt.Errorf("close mime writer: %w: %w", err, channels.ErrSendFailed)
+	}
+
+	smtpPort := c.config.SMTPPort
+	if smtpPort == 0 {
+		smtpPort = 587
+	}
+
+	addr := fmt.Sprintf("%s:%d", c.config.SMTPHost, smtpPort)
+	smtpUser := c.config.SMTPUser.String()
+	if smtpUser == "" {
+		smtpUser = c.config.SMTPFrom.String()
+	}
+
+	var auth smtp.Auth
+	if c.config.SMTPPassword.String() != "" {
+		auth = smtp.PlainAuth("", smtpUser, c.config.SMTPPassword.String(), c.config.SMTPHost)
+	}
+
+	if smtpPort == 465 {
+		tlsCfg := &tls.Config{ServerName: c.config.SMTPHost}
+		conn, err := tls.Dial("tcp", addr, tlsCfg)
+		if err != nil {
+			return fmt.Errorf("smtp tls dial: %w", channels.ErrTemporary)
+		}
+		client, err := smtp.NewClient(conn, c.config.SMTPHost)
+		if err != nil {
+			return fmt.Errorf("smtp new client: %w", channels.ErrTemporary)
+		}
+		defer func() { _ = client.Close() }()
+		if err := sendViaSMTPClient(client, auth, c.config.SMTPFrom.String(), to, bodyBuf.Bytes()); err != nil {
+			return err
+		}
+	} else {
+		if err := smtp.SendMail(addr, auth, c.config.SMTPFrom.String(), []string{to}, bodyBuf.Bytes()); err != nil {
+			return fmt.Errorf("smtp send: %w: %w", err, channels.ErrTemporary)
+		}
+	}
+
+	var outboundRefsStr string
+	if replyToID != "" {
+		parts := make([]string, 0, len(ancestorRefs)+1)
+		for _, r := range ancestorRefs {
+			parts = append(parts, "<"+r+">")
+		}
+		parts = append(parts, "<"+replyToID+">")
+		outboundRefsStr = strings.Join(parts, " ")
+	}
+	c.tmMu.Lock()
+	c.tm.ProcessHeaders(outboundMsgIDRaw, subject, replyToID, outboundRefsStr)
+	c.tmMu.Unlock()
+
+	logger.DebugCF("email", "Media message sent", map[string]any{"to": to, "attachments": len(attachments)})
+	return nil
+}
+
 func sendViaSMTPClient(client *smtp.Client, auth smtp.Auth, from, to string, body []byte) error {
 	if auth != nil {
 		if err := client.Auth(auth); err != nil {
@@ -331,7 +511,9 @@ func (c *EmailChannel) pollIMAP() {
 		return
 	}
 
-	if len(searchData.AllSeqNums()) == 0 {
+	unseenCount := len(searchData.AllSeqNums())
+	logger.DebugCF("email", "IMAP poll complete", map[string]any{"unseen": unseenCount})
+	if unseenCount == 0 {
 		return
 	}
 
@@ -374,10 +556,13 @@ func (c *EmailChannel) pollIMAP() {
 		}
 
 		if envelope == nil || bodyBytes == nil {
+			logger.DebugCF("email", "Skipping IMAP message: missing envelope or body", map[string]any{"seq": seqNum, "has_envelope": envelope != nil, "has_body": len(bodyBytes) > 0})
 			continue
 		}
+		logger.DebugCF("email", "Processing IMAP message", map[string]any{"seq": seqNum, "from": extractFrom(envelope), "subject": envelope.Subject, "size": len(bodyBytes)})
 		processed, _ := c.processEmail(c.ctx, envelope, bytes.NewReader(bodyBytes))
 		if !processed {
+			logger.DebugCF("email", "IMAP message skipped by processEmail", map[string]any{"seq": seqNum, "from": extractFrom(envelope), "subject": envelope.Subject})
 			continue
 		}
 
@@ -401,11 +586,13 @@ func (c *EmailChannel) pollIMAP() {
 func (c *EmailChannel) processEmail(ctx context.Context, envelope *imap.Envelope, bodyLiteral io.Reader) (bool, string) {
 	fromAddr := extractFrom(envelope)
 	if fromAddr == "" {
+		logger.DebugCF("email", "processEmail skipped: empty sender", map[string]any{"subject": envelope.Subject})
 		return false, ""
 	}
 
 	raw, err := io.ReadAll(bodyLiteral)
 	if err != nil {
+		logger.DebugCF("email", "processEmail skipped: read error", map[string]any{"err": err.Error()})
 		return false, ""
 	}
 
@@ -415,13 +602,18 @@ func (c *EmailChannel) processEmail(ctx context.Context, envelope *imap.Envelope
 	}
 
 	plainText, references := extractBodyParts(bytes.NewReader(raw))
-	if strings.TrimSpace(plainText) == "" {
+	attachments := extractAttachments(bytes.NewReader(raw))
+
+	// Allow emails with only attachments (no text body) to be processed.
+	if strings.TrimSpace(plainText) == "" && len(attachments) == 0 {
+		logger.DebugCF("email", "processEmail skipped: empty body and no attachments", map[string]any{"from": fromAddr, "subject": envelope.Subject})
 		return false, ""
 	}
 
 	logger.InfoCF("email", "Email received", map[string]any{
-		"from":    fromAddr,
-		"subject": envelope.Subject,
+		"from":        fromAddr,
+		"subject":     envelope.Subject,
+		"attachments": len(attachments),
 	})
 
 	metadata := map[string]string{}
@@ -441,6 +633,8 @@ func (c *EmailChannel) processEmail(ctx context.Context, envelope *imap.Envelope
 		metadata["reply_to_message_id"] = rawID
 	}
 
+	mediaPaths := newEmailMediaHandler(c.GetMediaStore()).storeInboundAttachments(fromAddr, envelope.MessageID, attachments)
+
 	sender := bus.SenderInfo{
 		Platform:    "email",
 		PlatformID:  fromAddr,
@@ -451,7 +645,7 @@ func (c *EmailChannel) processEmail(ctx context.Context, envelope *imap.Envelope
 	c.HandleMessageWithContext(ctx,
 		fromAddr,
 		plainText,
-		nil,
+		mediaPaths,
 		bus.InboundContext{
 			ChatType:  "direct",
 			ChatID:    fromAddr,

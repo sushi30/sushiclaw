@@ -36,14 +36,14 @@ func TestLoadExampleConfig(t *testing.T) {
 		t.Fatalf("LoadConfig: %v", err)
 	}
 
-	if cfg.Agents.Defaults.ModelName != "claude-sonnet" {
-		t.Errorf("model_name = %q, want %q", cfg.Agents.Defaults.ModelName, "claude-sonnet")
+	if cfg.Agents.Defaults.ModelName != "gpt-4o-mini" {
+		t.Errorf("model_name = %q, want %q", cfg.Agents.Defaults.ModelName, "gpt-4o-mini")
 	}
 	if len(cfg.ModelList) == 0 {
 		t.Fatal("model_list is empty")
 	}
-	if cfg.ModelList[0].ModelName != "claude-sonnet" {
-		t.Errorf("model_list[0].model_name = %q, want %q", cfg.ModelList[0].ModelName, "claude-sonnet")
+	if cfg.ModelList[0].ModelName != "gpt-4o-mini" {
+		t.Errorf("model_list[0].model_name = %q, want %q", cfg.ModelList[0].ModelName, "gpt-4o-mini")
 	}
 	if cfg.Gateway.Port != 18800 {
 		t.Errorf("gateway.port = %d, want 18800", cfg.Gateway.Port)

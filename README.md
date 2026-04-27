@@ -150,11 +150,12 @@ See [docs/MCP.md](docs/MCP.md) for full configuration options and examples.
 
 ---
 
-### WhatsApp voice memo transcription
+### Voice transcription
 
-Incoming WhatsApp audio messages are transcribed before reaching the agent. Powered by the ASR provider in the `voice` config block. Set `echo_transcription: true` to send the transcript back to the sender.
+Incoming WhatsApp and Telegram audio messages can be transcribed before
+reaching the agent. Powered by the ASR provider in the `voice` config block.
 
-Requires the `whatsapp_native` build tag (included in `make build`).
+See [docs/VOICE.md](docs/VOICE.md) for configuration options and examples.
 
 ---
 

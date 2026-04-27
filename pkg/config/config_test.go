@@ -14,9 +14,9 @@ func TestParseExampleConfig(t *testing.T) {
 	cfg, err := config.LoadConfig("../../config.example.json")
 	require.NoError(t, err)
 
-	assert.Equal(t, "claude-sonnet", cfg.Agents.Defaults.ModelName)
+	assert.Equal(t, "gpt-4o-mini", cfg.Agents.Defaults.ModelName)
 	assert.NotEmpty(t, cfg.ModelList)
-	assert.Equal(t, "claude-sonnet", cfg.ModelList[0].ModelName)
+	assert.Equal(t, "gpt-4o-mini", cfg.ModelList[0].ModelName)
 	assert.Equal(t, 18800, cfg.Gateway.Port)
 	assert.NotNil(t, cfg.Channels["telegram"])
 }
@@ -31,7 +31,7 @@ func TestChannelDecode(t *testing.T) {
 
 	var tgSettings config.TelegramSettings
 	require.NoError(t, tgCh.Decode(&tgSettings))
-	// Token value is "YOUR_TELEGRAM_BOT_TOKEN" in example
+	// Token value is an env:// reference in example config.
 	assert.NotEmpty(t, tgSettings.Token.String())
 }
 

@@ -69,7 +69,7 @@ docker pull ghcr.io/sushi30/sushiclaw:latest
 
 docker run -d \
   -v ~/.picoclaw:/home/sushiclaw/.picoclaw \
-  -e ANTHROPIC_API_KEY=sk-... \
+  -e OPENAI_API_KEY=sk-... \
   ghcr.io/sushi30/sushiclaw:latest gateway
 ```
 
@@ -86,10 +86,10 @@ Copy `config.example.json` to `~/.picoclaw/config.json`. Key sections:
   "agents": {
     "defaults": {
       "workspace": "~/.picoclaw/workspace",
-      "model_name": "claude-sonnet"
+      "model_name": "gpt-4o-mini"
     }
   },
-  "model_list": [{ "model_name": "claude-sonnet", "api_key": "env://ANTHROPIC_API_KEY" }],
+  "model_list": [{ "model_name": "gpt-4o-mini", "api_key": "env://OPENAI_API_KEY" }],
   "channels": { ... },
   "email_channel": { ... },
   "tools": { ... }
@@ -107,10 +107,24 @@ Override config path with `$SUSHICLAW_CONFIG`.
 API keys in `config.json` can reference environment variables:
 
 ```json
-{ "api_key": "env://ANTHROPIC_API_KEY" }
+{ "api_key": "env://OPENAI_API_KEY" }
 ```
 
 Resolved at load time by `pkg/config.SecureString` during JSON unmarshal.
+
+For Telegram image handling, enable the vision tool with a vision-capable model:
+
+```json
+{
+  "tools": {
+    "vision": {
+      "enabled": true,
+      "model": "openrouter/z-ai/glm-5v-turbo",
+      "api_key": "env://OPENROUTER_API_KEY"
+    }
+  }
+}
+```
 
 ---
 

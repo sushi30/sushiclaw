@@ -4,7 +4,7 @@
     "defaults": {
       "workspace": "~/.picoclaw/workspace",
       "restrict_to_workspace": true,
-      "model_name": "claude-sonnet",
+      "model_name": "gpt-4o-mini",
       "max_tokens": 8192,
       "context_window": 131072,
       "temperature": 0.7,
@@ -15,10 +15,10 @@
   },
   "model_list": [
     {
-      "model_name": "claude-sonnet",
-      "model": "anthropic/claude-sonnet-4-6",
-      "api_key": "env://ANTHROPIC_API_KEY",
-      "api_base": "https://api.anthropic.com/v1"
+      "model_name": "gpt-4o-mini",
+      "model": "gpt-4o-mini",
+      "api_key": "env://OPENAI_API_KEY",
+      "api_base": "https://api.openai.com/v1"
     }
   ],
   "channels": {
@@ -34,7 +34,7 @@
     },
     "telegram": {
       "enabled": false,
-      "token": "YOUR_TELEGRAM_BOT_TOKEN",
+      "token": "env://TELEGRAM_BOT_TOKEN",
       "allow_from": [],
       "group_trigger": {
         "mention_only": true
@@ -94,6 +94,13 @@
       "enabled": true,
       "allow_command": true,
       "exec_timeout_minutes": 5
+    },
+    "vision": {
+      "enabled": true,
+      "model": "gpt-4o-mini",
+      "api_key": "env://OPENAI_API_KEY",
+      "api_base": "https://api.openai.com/v1",
+      "prompt": "Describe this image in detail."
     },
     "media_cleanup": {
       "enabled": true,

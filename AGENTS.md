@@ -170,7 +170,7 @@ Copy `config.example.json` to get started.
 Any config field that uses `SecureString` supports `env://VAR_NAME` references:
 
 ```json
-{ "api_key": "env://ANTHROPIC_API_KEY" }
+{ "api_key": "env://OPENAI_API_KEY" }
 ```
 
 Resolution happens during `json.Unmarshal` in `pkg/config.SecureString.UnmarshalJSON`. If the
@@ -303,7 +303,7 @@ See `RELEASE_NOTES.md` for the email config migration guide if upgrading from an
 docker build -t sushiclaw .
 docker run -d \
   -v ~/.picoclaw:/home/sushiclaw/.picoclaw \
-  -e ANTHROPIC_API_KEY=sk-... \
+  -e OPENAI_API_KEY=sk-... \
   sushiclaw gateway
 ```
 

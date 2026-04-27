@@ -182,7 +182,7 @@ func (t *VisionTool) describeImage(ctx context.Context, prompt, dataURI string) 
 	if err != nil {
 		return "", fmt.Errorf("vision API request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {

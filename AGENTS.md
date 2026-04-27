@@ -118,6 +118,7 @@ make vet             # go vet ./...
 make deps            # go mod tidy
 make test-integration # Run email integration tests
 make release-check   # Verify VERSION is set (not "dev")
+make air             # Start a dev server in a new tmux pane using `air`
 ```
 
 Always build with the `whatsapp_native` tag:

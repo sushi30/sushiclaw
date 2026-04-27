@@ -10,7 +10,7 @@ LDFLAGS     := -X $(VERSION_PKG).Version=$(VERSION) \
                -X $(VERSION_PKG).BuildTime=$(BUILDTIME) \
                -X $(VERSION_PKG).GoVersion=$(GOVER)
 
-.PHONY: build test install lint fmt vet deps test-integration release-check publish-version publish-version-dry-run
+.PHONY: build test install lint fmt vet deps test-integration release-check publish-version publish-version-dry-run air
 
 build:
 	CGO_ENABLED=0 go build -tags whatsapp_native -ldflags "$(LDFLAGS)" -o $(BINARY) .
@@ -57,3 +57,6 @@ publish-version:
 
 publish-version-dry-run:
 	./scripts/publish-version.sh --dry-run
+
+air:
+	./script/deh.sh

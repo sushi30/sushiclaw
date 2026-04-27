@@ -15,7 +15,9 @@ import (
 	"github.com/Ingenimax/agent-sdk-go/pkg/interfaces"
 	"github.com/Ingenimax/agent-sdk-go/pkg/llm/openai"
 
+	"github.com/sushi30/sushiclaw/pkg/audio/asr"
 	"github.com/sushi30/sushiclaw/pkg/bus"
+	"github.com/sushi30/sushiclaw/pkg/channels"
 	"github.com/sushi30/sushiclaw/pkg/commands"
 	"github.com/sushi30/sushiclaw/pkg/config"
 	"github.com/sushi30/sushiclaw/pkg/llm/openrouter"
@@ -32,6 +34,7 @@ type SessionManager struct {
 	tools           []interfaces.Tool
 	progress        ProgressSink
 	mediaStore      media.MediaStore
+	transcriber     asr.Transcriber
 	sessions        map[string]*Session
 	mu              sync.RWMutex
 	ttl             time.Duration
@@ -277,6 +280,16 @@ func (sm *SessionManager) ClearHistory(sessionKey string) error {
 	return nil
 }
 
+// SetMediaStore injects a MediaStore for resolving media refs (e.g. voice messages).
+func (sm *SessionManager) SetMediaStore(ms media.MediaStore) {
+	sm.mediaStore = ms
+}
+
+// SetTranscriber injects an ASR transcriber for voice message transcription.
+func (sm *SessionManager) SetTranscriber(t asr.Transcriber) {
+	sm.transcriber = t
+}
+
 // ActivateSkill reads a skill's SKILL.md and injects it into the conversation
 // memory as a system message. If the skill is already loaded, it returns
 // commands.ErrSkillAlreadyLoaded.
@@ -416,6 +429,32 @@ func computeSessionKey(msg bus.InboundMessage) string {
 
 func (s *Session) handleInbound(ctx context.Context, msg bus.InboundMessage, sessionKey string) {
 	chatID := msg.ChatID
+
+	// Transcribe audio before processing.
+	msg, hadAudio, err := s.mgr.transcribeAudioInMessage(ctx, msg)
+	if err != nil {
+		logger.WarnCF("agent", "Transcription failed", map[string]any{"error": err.Error()})
+		if s.mgr.bus != nil {
+			_ = s.mgr.bus.PublishOutbound(ctx, bus.OutboundMessage{
+				Channel:    msg.Channel,
+				ChatID:     chatID,
+				SessionKey: sessionKey,
+				Content:    "Sorry, I couldn't transcribe that voice message.",
+			})
+		}
+		return
+	}
+	if hadAudio && msg.Content == "" {
+		if s.mgr.bus != nil {
+			_ = s.mgr.bus.PublishOutbound(ctx, bus.OutboundMessage{
+				Channel:    msg.Channel,
+				ChatID:     chatID,
+				SessionKey: sessionKey,
+				Content:    "Sorry, I couldn't understand that voice message.",
+			})
+		}
+		return
+	}
 
 	// Attach chat ID to context for tool use.
 	actx := exec.WithChatID(ctx, chatID)
@@ -715,6 +754,91 @@ func firstInt(m map[string]interface{}, keys ...string) (int, bool) {
 		}
 	}
 	return 0, false
+}
+
+// transcribeAudioInMessage resolves audio media refs, transcribes them, and
+// replaces [voice]/[audio] annotations with <transcription> tags.
+// Returns the modified message, whether audio was present, and any fatal error.
+func (sm *SessionManager) transcribeAudioInMessage(ctx context.Context, msg bus.InboundMessage) (bus.InboundMessage, bool, error) {
+	if sm.transcriber == nil || sm.mediaStore == nil {
+		return msg, false, nil
+	}
+
+	var transcriptions []string
+	var keptMedia []string
+	hadAudio := false
+	successCount := 0
+
+	for _, ref := range msg.Media {
+		path, meta, err := sm.mediaStore.ResolveWithMeta(ref)
+		if err != nil {
+			logger.WarnCF("voice", "Failed to resolve media ref", map[string]any{"ref": ref, "error": err.Error()})
+			keptMedia = append(keptMedia, ref)
+			continue
+		}
+		if !asr.IsAudioFile(meta.Filename, meta.ContentType) {
+			keptMedia = append(keptMedia, ref)
+			continue
+		}
+		hadAudio = true
+
+		result, err := sm.transcriber.Transcribe(ctx, path)
+		if err != nil {
+			logger.WarnCF("voice", "Transcription failed", map[string]any{"ref": ref, "error": err.Error()})
+			transcriptions = append(transcriptions, "")
+			keptMedia = append(keptMedia, ref)
+			continue
+		}
+		transcriptions = append(transcriptions, result.Text)
+		successCount++
+	}
+
+	if !hadAudio {
+		return msg, false, nil
+	}
+
+	if successCount == 0 {
+		return msg, true, fmt.Errorf("all transcriptions failed")
+	}
+
+	// Replace annotations sequentially.
+	idx := 0
+	newContent := channels.AudioAnnotationRe.ReplaceAllStringFunc(msg.Content, func(match string) string {
+		if idx >= len(transcriptions) {
+			return match
+		}
+		text := transcriptions[idx]
+		idx++
+		if text == "" {
+			return match
+		}
+		return asr.WrapTranscription(text)
+	})
+
+	// Append any leftover transcriptions.
+	for ; idx < len(transcriptions); idx++ {
+		if transcriptions[idx] != "" {
+			if newContent != "" {
+				newContent += "\n"
+			}
+			newContent += asr.WrapTranscription(transcriptions[idx])
+		}
+	}
+
+	// If no annotations were present but we had audio, wrap the transcriptions.
+	if msg.Content == "" && newContent == "" {
+		var parts []string
+		for _, t := range transcriptions {
+			if t != "" {
+				parts = append(parts, asr.WrapTranscription(t))
+			}
+		}
+		newContent = strings.Join(parts, "\n")
+	}
+
+	msg.Content = newContent
+	msg.Media = keptMedia
+	return msg, true, nil
 }
 
 func createLLM(cfg *config.Config) (interfaces.LLM, error) {

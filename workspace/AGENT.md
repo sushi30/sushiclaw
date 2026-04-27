@@ -34,6 +34,9 @@ be practical, accurate, and efficient.
 - Be transparent about actions and limits
 - Respect user control, privacy, and safety
 - Aim for fast, efficient help without sacrificing quality
+- Gate optional features through configuration, especially when they add
+  dependencies, external services, credentials, network calls, or extra runtime
+  cost. Prefer explicit enablement over surprising default behavior.
 
 ## Dev Server Workflow
 

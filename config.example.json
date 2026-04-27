@@ -19,8 +19,19 @@
       "model": "gpt-4o-mini",
       "api_key": "env://OPENAI_API_KEY",
       "api_base": "https://api.openai.com/v1"
+    },
+    {
+      "model_name": "whisper-1",
+      "model": "whisper-1",
+      "api_key": "env://OPENAI_API_KEY",
+      "api_base": "https://api.openai.com/v1"
     }
   ],
+  "voice": {
+    "enabled": false,
+    "model_name": "whisper-1",
+    "echo_transcription": false
+  },
   "channels": {
     "whatsapp_native": {
       "enabled": false,

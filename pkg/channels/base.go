@@ -31,7 +31,8 @@ func init() {
 	uniqueIDPrefix = hex.EncodeToString(b[:])
 }
 
-var audioAnnotationRe = regexp.MustCompile(`\[(voice|audio)(?::[^\]]*)?\]`)
+// AudioAnnotationRe matches [voice] and [audio] annotations in message content.
+var AudioAnnotationRe = regexp.MustCompile(`\[(voice|audio)(?::[^\]]*)?\]`)
 
 func uniqueID() string {
 	n := atomic.AddUint64(&uniqueIDCounter, 1)
@@ -286,7 +287,7 @@ func (c *BaseChannel) HandleMessageWithContextAndSession(
 				c.placeholderRecorder.RecordReactionUndo(c.name, deliveryChatID, undo)
 			}
 		}
-		if !audioAnnotationRe.MatchString(content) {
+		if !AudioAnnotationRe.MatchString(content) {
 			if pc, ok := c.owner.(PlaceholderCapable); ok {
 				if phID, err := pc.SendPlaceholder(ctx, deliveryChatID); err == nil && phID != "" {
 					c.placeholderRecorder.RecordPlaceholder(c.name, deliveryChatID, phID)

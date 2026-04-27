@@ -10,9 +10,9 @@ import (
 
 // Channel type constants.
 const (
-	ChannelTelegram       = "telegram"
-	ChannelWhatsAppNative = "whatsapp_native"
-	ChannelEmail          = "email"
+	ChannelTelegram        = "telegram"
+	ChannelWhatsAppNative  = "whatsapp_native"
+	ChannelEmail           = "email"
 	ChannelWebSocket       = "websocket"
 	ChannelWebSocketClient = "websocket_client"
 )
@@ -22,13 +22,14 @@ const DefaultMaxMediaSize = 20 * 1024 * 1024
 
 // Config is the top-level sushiclaw configuration.
 type Config struct {
-	Version   int            `json:"version,omitempty"`
-	Agents    AgentsConfig   `json:"agents"`
-	ModelList []ModelConfig  `json:"model_list"`
-	Channels  ChannelsConfig `json:"channels"`
-	Gateway   GatewayConfig  `json:"gateway"`
-	Tools     ToolsConfig    `json:"tools"`
-	MCP       MCPConfig      `json:"mcp,omitempty"`
+	Version     int            `json:"version,omitempty"`
+	Agents      AgentsConfig   `json:"agents"`
+	ModelList   []ModelConfig  `json:"model_list"`
+	Channels    ChannelsConfig `json:"channels"`
+	Gateway     GatewayConfig  `json:"gateway"`
+	Tools       ToolsConfig    `json:"tools"`
+	MCP         MCPConfig      `json:"mcp,omitempty"`
+	VoiceConfig VoiceConfig    `json:"voice,omitempty"`
 }
 
 // MCPConfig holds MCP server configuration.
@@ -297,6 +298,7 @@ func (c *WebSocketClientSettings) SetToken(token string) {
 
 // VoiceConfig holds voice/ASR settings.
 type VoiceConfig struct {
+	Enabled           bool   `json:"enabled"`
 	ModelName         string `json:"model_name,omitempty"`
 	TTSModelName      string `json:"tts_model_name,omitempty"`
 	EchoTranscription bool   `json:"echo_transcription"`
@@ -379,8 +381,8 @@ func expandHome(p string) string {
 	return p
 }
 
-// Voice returns a zero VoiceConfig (sushiclaw doesn't configure voice globally).
-func (c *Config) Voice() VoiceConfig { return VoiceConfig{} }
+// Voice returns the voice configuration.
+func (c *Config) Voice() VoiceConfig { return c.VoiceConfig }
 
 // GetHome returns the sushiclaw home directory.
 func GetHome() string {

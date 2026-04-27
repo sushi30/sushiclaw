@@ -446,6 +446,12 @@ func (c *WhatsAppNativeChannel) handleIncoming(evt *events.Message) {
 					}, scope)
 					if storeErr == nil {
 						mediaPaths = append(mediaPaths, ref)
+						if strings.HasPrefix(mimetype, "audio/") {
+							if content != "" {
+								content += "\n"
+							}
+							content += "[voice]"
+						}
 					}
 				}
 			}

@@ -82,7 +82,7 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 	defer mediaStore.Stop()
 
 	allowedSenders := sushitools.ParseAllowedSenders()
-	tools, err := sushitools.NewGatewayTools(cfg, allowedSenders, mediaStore)
+	tools, err := sushitools.NewGatewayTools(cfg, allowedSenders, mediaStore, messageBus)
 	if err != nil {
 		logger.WarnCF("gateway", "Failed to init trusted exec tool",
 			map[string]any{"error": err.Error()})
@@ -128,6 +128,10 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 	if cfg.Tools.IsToolEnabled("vision") {
 		logger.InfoCF("gateway", "Vision tool registered",
 			map[string]any{"model": cfg.Tools.Vision.Model})
+	}
+
+	if cfg.Tools.IsToolEnabled("message") {
+		logger.InfoC("gateway", "Message tool registered")
 	}
 
 	sessionMgr, err := agent.NewSessionManager(cfg, messageBus, tools, mediaStore, agent.WithProgressSink(dm))

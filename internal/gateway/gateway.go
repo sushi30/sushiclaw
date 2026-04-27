@@ -12,6 +12,7 @@ import (
 	"github.com/sushi30/sushiclaw/internal/agent"
 	"github.com/sushi30/sushiclaw/internal/commandfilter"
 	"github.com/sushi30/sushiclaw/internal/envresolve"
+	"github.com/sushi30/sushiclaw/pkg/audio/asr"
 	"github.com/sushi30/sushiclaw/pkg/bus"
 	"github.com/sushi30/sushiclaw/pkg/channels"
 	"github.com/sushi30/sushiclaw/pkg/commands"
@@ -145,6 +146,16 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 	if sessionMgr != nil {
 		sessionMgr.Start()
 		defer sessionMgr.Stop()
+	}
+
+	if sessionMgr != nil {
+		sessionMgr.SetMediaStore(mediaStore)
+		if transcriber := asr.DetectTranscriber(cfg); transcriber != nil {
+			sessionMgr.SetTranscriber(transcriber)
+			logger.InfoCF("gateway", "Voice transcription registered", map[string]any{
+				"provider": transcriber.Name(),
+			})
+		}
 	}
 
 	cm, err := channels.NewManager(cfg, messageBus, mediaStore)

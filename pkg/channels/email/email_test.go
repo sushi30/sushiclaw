@@ -403,6 +403,9 @@ func TestProcessEmail_TextInteraction(t *testing.T) {
 		if inbound.Context.Raw["reply_to_message_id"] != "mid-1" {
 			t.Errorf("metadata[reply_to_message_id] = %q, want %q", inbound.Context.Raw["reply_to_message_id"], "mid-1")
 		}
+		if inbound.SessionKey != "email:mid-1" {
+			t.Errorf("SessionKey = %q, want %q", inbound.SessionKey, "email:mid-1")
+		}
 	}
 }
 
@@ -507,13 +510,16 @@ func TestSend_ReplyThreadingHeaders(t *testing.T) {
 		}
 	})
 
-	t.Run("no ReplyToMessageID — fallback via lastMsgByChatID", func(t *testing.T) {
+	t.Run("no ReplyToMessageID — fallback via lastMsgByThread", func(t *testing.T) {
 		ch, received := newCh(t)
 		ch.tm.ProcessHeaders("inbound-msg@sender.com", "User question", "", "")
-		ch.lastMsgByChatID.Store("user@example.com", "inbound-msg@sender.com")
+		threadID := ch.tm.ThreadID("inbound-msg@sender.com")
+		sessionKey := ch.Name() + ":" + threadID
+		ch.lastMsgByThread.Store(sessionKey, "inbound-msg@sender.com")
 
 		_, err := ch.Send(context.Background(), bus.OutboundMessage{
 			ChatID: "user@example.com", Content: "Agent reply",
+			SessionKey: sessionKey,
 		})
 		if err != nil {
 			t.Fatal(err)

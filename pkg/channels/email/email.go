@@ -36,7 +36,7 @@ type EmailChannel struct {
 	cancel          context.CancelFunc
 	tm              *ThreadManager
 	tmMu            sync.RWMutex
-	lastMsgByChatID sync.Map // chatID/fromAddr (string) → most recent inbound messageID (string)
+	lastMsgByThread sync.Map // threadID (string) → most recent inbound messageID (string)
 }
 
 // NewEmailChannel creates a new email channel.
@@ -140,12 +140,14 @@ func (c *EmailChannel) Send(ctx context.Context, msg bus.OutboundMessage) ([]str
 	outboundMsgIDRaw := strings.Trim(outboundMsgID, "<>")
 
 	// Resolve reply target: use explicit ReplyToMessageID or fall back to the last
-	// inbound from this chat. The picoclaw framework's default response path
-	// (PublishResponseIfNeeded) never sets ReplyToMessageID on outbound messages,
-	// so the fallback is the primary way threading works in practice.
+	// inbound from this thread. SessionKey carries the thread ID for email.
 	replyToID := msg.ReplyToMessageID
 	if replyToID == "" {
-		if v, ok := c.lastMsgByChatID.Load(to); ok {
+		threadKey := msg.SessionKey
+		if threadKey == "" {
+			threadKey = to
+		}
+		if v, ok := c.lastMsgByThread.Load(threadKey); ok {
 			replyToID = v.(string)
 		}
 	}
@@ -292,7 +294,7 @@ func (c *EmailChannel) sendMultipartEmail(ctx context.Context, to, content, repl
 	outboundMsgIDRaw := strings.Trim(outboundMsgID, "<>")
 
 	if replyToID == "" {
-		if v, ok := c.lastMsgByChatID.Load(to); ok {
+		if v, ok := c.lastMsgByThread.Load(to); ok {
 			replyToID = v.(string)
 		}
 	}
@@ -621,6 +623,7 @@ func (c *EmailChannel) processEmail(ctx context.Context, envelope *imap.Envelope
 	})
 
 	metadata := map[string]string{}
+	var threadID string
 	if envelope.MessageID != "" {
 		rawID := strings.Trim(envelope.MessageID, "<>")
 
@@ -631,9 +634,11 @@ func (c *EmailChannel) processEmail(ctx context.Context, envelope *imap.Envelope
 
 		c.tmMu.Lock()
 		c.tm.ProcessHeaders(rawID, envelope.Subject, inReplyTo, references)
+		threadID = c.tm.ThreadID(rawID)
 		c.tmMu.Unlock()
 
-		c.lastMsgByChatID.Store(fromAddr, rawID)
+		sessionKey := c.Name() + ":" + threadID
+		c.lastMsgByThread.Store(sessionKey, rawID)
 		metadata["reply_to_message_id"] = rawID
 	}
 
@@ -646,19 +651,20 @@ func (c *EmailChannel) processEmail(ctx context.Context, envelope *imap.Envelope
 		DisplayName: displayName(envelope),
 	}
 
-	c.HandleMessageWithContext(ctx,
-		fromAddr,
-		plainText,
-		mediaPaths,
-		bus.InboundContext{
-			ChatType:  "direct",
-			ChatID:    fromAddr,
-			SenderID:  fromAddr,
-			MessageID: envelope.MessageID,
-			Raw:       metadata,
-		},
-		sender,
-	)
+	inboundCtx := bus.InboundContext{
+		ChatType:  "direct",
+		ChatID:    fromAddr,
+		SenderID:  fromAddr,
+		MessageID: envelope.MessageID,
+		Raw:       metadata,
+	}
+
+	sessionKey := ""
+	if threadID != "" {
+		sessionKey = c.Name() + ":" + threadID
+	}
+
+	c.HandleInboundContextAndSession(ctx, fromAddr, plainText, mediaPaths, inboundCtx, sessionKey, sender)
 
 	return true, plainText
 }

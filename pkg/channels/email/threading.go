@@ -84,6 +84,19 @@ func (tm *ThreadManager) ProcessHeaders(msgID, subject, inReplyTo, references st
 	parentNode.Children = append(parentNode.Children, node)
 }
 
+// ThreadID returns the root Message-ID of the thread that msgID belongs to.
+// If msgID is unknown, it returns msgID itself.
+func (tm *ThreadManager) ThreadID(msgID string) string {
+	node, ok := tm.AllMessages[msgID]
+	if !ok {
+		return msgID
+	}
+	for node.Parent != nil {
+		node = node.Parent
+	}
+	return node.MessageID
+}
+
 // BuildThreads rebuilds the Threads slice from AllMessages.
 // Call after all ProcessHeaders calls are done if you need the root list.
 func (tm *ThreadManager) BuildThreads() {

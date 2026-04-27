@@ -138,6 +138,10 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 			return fmt.Errorf("error creating agent session: %w", err)
 		}
 	}
+	if sessionMgr != nil {
+		sessionMgr.Start()
+		defer sessionMgr.Stop()
+	}
 
 	cm, err := channels.NewManager(cfg, messageBus, mediaStore)
 	if err != nil {
@@ -170,11 +174,15 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 
 	rt.SetDebug = dm.Set
 	if sessionMgr != nil {
-		rt.ClearHistory = sessionMgr.ClearHistory
+		rt.ClearHistory = func(req commands.Request) error {
+			return sessionMgr.ClearHistory(req.SessionKey)
+		}
 		rt.GetModelInfo = sessionMgr.GetModelInfo
 		rt.ListModels = sessionMgr.ListModels
 		rt.ListSkills = sessionMgr.ListSkills
-		rt.ActivateSkill = sessionMgr.ActivateSkill
+		rt.ActivateSkill = func(req commands.Request, skillName string) error {
+			return sessionMgr.ActivateSkill(req.SessionKey, skillName)
+		}
 	}
 	executor := commands.NewExecutor(reg, rt)
 
@@ -211,14 +219,20 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 					continue
 				}
 
+				sessionKey := msg.SessionKey
+				if sessionKey == "" {
+					sessionKey = msg.Channel + ":" + msg.ChatID
+				}
+
 				if commands.HasCommandPrefix(msg.Content) {
 					var reply string
 					result := executor.Execute(ctx, commands.Request{
-						Channel:  msg.Channel,
-						ChatID:   msg.ChatID,
-						SenderID: msg.SenderID,
-						Text:     msg.Content,
-						Reply:    func(text string) error { reply = text; return nil },
+						Channel:    msg.Channel,
+						ChatID:     msg.ChatID,
+						SenderID:   msg.SenderID,
+						Text:       msg.Content,
+						SessionKey: sessionKey,
+						Reply:      func(text string) error { reply = text; return nil },
 					})
 					logger.DebugCF("executor", "Command executed",
 						map[string]any{

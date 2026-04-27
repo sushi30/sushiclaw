@@ -219,6 +219,19 @@ func (c *BaseChannel) HandleMessageWithContext(
 	inboundCtx bus.InboundContext,
 	senderOpts ...bus.SenderInfo,
 ) {
+	c.HandleMessageWithContextAndSession(ctx, deliveryChatID, content, mediaFiles, inboundCtx, "", senderOpts...)
+}
+
+// HandleMessageWithContextAndSession is like HandleMessageWithContext but allows
+// the caller to specify an explicit session key for per-conversation isolation.
+func (c *BaseChannel) HandleMessageWithContextAndSession(
+	ctx context.Context,
+	deliveryChatID, content string,
+	mediaFiles []string,
+	inboundCtx bus.InboundContext,
+	sessionKey string,
+	senderOpts ...bus.SenderInfo,
+) {
 	var sender bus.SenderInfo
 	if len(senderOpts) > 0 {
 		sender = senderOpts[0]
@@ -258,6 +271,7 @@ func (c *BaseChannel) HandleMessageWithContext(
 		Content:    content,
 		Media:      mediaFiles,
 		MediaScope: scope,
+		SessionKey: sessionKey,
 	}
 	msg = bus.NormalizeInboundMessage(msg)
 
@@ -299,6 +313,19 @@ func (c *BaseChannel) HandleInboundContext(
 	senderOpts ...bus.SenderInfo,
 ) {
 	c.HandleMessageWithContext(ctx, deliveryChatID, content, mediaFiles, inboundCtx, senderOpts...)
+}
+
+// HandleInboundContextAndSession is like HandleInboundContext but allows the
+// caller to specify an explicit session key for per-conversation isolation.
+func (c *BaseChannel) HandleInboundContextAndSession(
+	ctx context.Context,
+	deliveryChatID, content string,
+	mediaFiles []string,
+	inboundCtx bus.InboundContext,
+	sessionKey string,
+	senderOpts ...bus.SenderInfo,
+) {
+	c.HandleMessageWithContextAndSession(ctx, deliveryChatID, content, mediaFiles, inboundCtx, sessionKey, senderOpts...)
 }
 
 // SetMediaStore injects a MediaStore into the channel.

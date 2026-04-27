@@ -46,11 +46,12 @@ func (d Definition) EffectiveUsage() string {
 
 // Request is the input to a command handler.
 type Request struct {
-	Channel  string
-	ChatID   string
-	SenderID string
-	Text     string
-	Reply    func(text string) error
+	Channel    string
+	ChatID     string
+	SenderID   string
+	Text       string
+	SessionKey string
+	Reply      func(text string) error
 }
 
 // SkillInfo describes a skill available in the configured workspace.
@@ -66,9 +67,9 @@ type Runtime struct {
 	ListModels      func() []string
 	ListSkills      func() []SkillInfo
 	ListCronJobs    func() (string, error)
-	ClearHistory    func() error
+	ClearHistory    func(req Request) error
 	SetDebug        func(ctx context.Context, channel, chatID, mode string) string
-	ActivateSkill   func(skillName string) error
+	ActivateSkill   func(req Request, skillName string) error
 }
 
 // Registry stores command definitions indexed by name and alias.
@@ -353,7 +354,7 @@ func listCronHandler(_ context.Context, req Request, rt *Runtime) error {
 
 func clearHandler(_ context.Context, req Request, rt *Runtime) error {
 	if rt != nil && rt.ClearHistory != nil {
-		if err := rt.ClearHistory(); err != nil {
+		if err := rt.ClearHistory(req); err != nil {
 			return req.Reply("Failed to clear history: " + err.Error())
 		}
 	}
@@ -401,7 +402,7 @@ func useHandler(_ context.Context, req Request, rt *Runtime) error {
 	if rt == nil || rt.ActivateSkill == nil {
 		return req.Reply("Skill activation is not available.")
 	}
-	if err := rt.ActivateSkill(skillName); err != nil {
+	if err := rt.ActivateSkill(req, skillName); err != nil {
 		if errors.Is(err, ErrSkillAlreadyLoaded) {
 			return req.Reply(fmt.Sprintf("Skill %s is already loaded.", skillName))
 		}

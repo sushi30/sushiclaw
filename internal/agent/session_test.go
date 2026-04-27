@@ -303,11 +303,11 @@ func TestSessionManager_ActivateSkill(t *testing.T) {
 	require.NoError(t, err)
 
 	// First activation should succeed.
-	err = sm.ActivateSkill("python")
+	err = sm.ActivateSkill("test-session", "python")
 	require.NoError(t, err)
 
 	// Verify the skill content is in memory.
-	msgs, err := sm.GetMessages(context.Background())
+	msgs, err := sm.GetMessages("test-session", context.Background())
 	require.NoError(t, err)
 	require.Len(t, msgs, 1)
 	assert.Equal(t, interfaces.MessageRoleSystem, msgs[0].Role)
@@ -337,8 +337,8 @@ func TestSessionManager_ActivateSkill_AlreadyLoaded(t *testing.T) {
 	sm, err := agent.NewSessionManager(cfg, nil, nil, nil)
 	require.NoError(t, err)
 
-	require.NoError(t, sm.ActivateSkill("python"))
-	err = sm.ActivateSkill("python")
+	require.NoError(t, sm.ActivateSkill("test-session", "python"))
+	err = sm.ActivateSkill("test-session", "python")
 	require.Error(t, err)
 	assert.ErrorIs(t, err, commands.ErrSkillAlreadyLoaded)
 }
@@ -363,7 +363,7 @@ func TestSessionManager_ActivateSkill_NotFound(t *testing.T) {
 	sm, err := agent.NewSessionManager(cfg, nil, nil, nil)
 	require.NoError(t, err)
 
-	err = sm.ActivateSkill("nonexistent")
+	err = sm.ActivateSkill("test-session", "nonexistent")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }

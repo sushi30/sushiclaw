@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	agentsdk "github.com/Ingenimax/agent-sdk-go/pkg/agent"
@@ -26,14 +27,26 @@ import (
 
 // SessionManager wraps an agent-sdk-go Agent and processes inbound bus messages.
 type SessionManager struct {
-	agent           agentRunner
-	bus             *bus.MessageBus
-	mem             *InMemoryMemory
 	cfg             *config.Config
+	bus             *bus.MessageBus
 	tools           []interfaces.Tool
-	activatedSkills map[string]bool
 	progress        ProgressSink
 	mediaStore      media.MediaStore
+	sessions        map[string]*Session
+	mu              sync.RWMutex
+	ttl             time.Duration
+	cleanupInterval time.Duration
+	cleanupStop     chan struct{}
+}
+
+// Session represents a single isolated conversation context.
+type Session struct {
+	agent           agentRunner
+	mem             *InMemoryMemory
+	activatedSkills map[string]bool
+	lastUsed        time.Time
+	mu              sync.RWMutex
+	mgr             *SessionManager
 }
 
 type agentRunner interface {
@@ -144,20 +157,18 @@ func toAgentSDKMCPConfig(cfg config.MCPConfig) *agentsdk.MCPConfiguration {
 
 // NewSessionManager creates a session manager from config.
 func NewSessionManager(cfg *config.Config, messageBus *bus.MessageBus, tools []interfaces.Tool, store media.MediaStore, opts ...SessionOption) (*SessionManager, error) {
-	mem := NewInMemoryMemory()
-	a, err := buildAgentWithMemory(cfg, tools, mem)
-	if err != nil {
-		return nil, err
+	if cfg.Agents.Defaults.MaxToolIterations < 0 {
+		return nil, fmt.Errorf("invalid max_tool_iterations %d: must be >= 0", cfg.Agents.Defaults.MaxToolIterations)
 	}
 
 	sm := &SessionManager{
-		agent:           a,
-		bus:             messageBus,
-		mem:             mem,
 		cfg:             cfg,
+		bus:             messageBus,
 		tools:           tools,
-		activatedSkills: make(map[string]bool),
 		mediaStore:      store,
+		sessions:        make(map[string]*Session),
+		ttl:             30 * 24 * time.Hour,
+		cleanupInterval: time.Hour,
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -167,16 +178,108 @@ func NewSessionManager(cfg *config.Config, messageBus *bus.MessageBus, tools []i
 	return sm, nil
 }
 
-// ClearHistory resets the agent's conversation memory.
-func (sm *SessionManager) ClearHistory() error {
-	return sm.mem.Clear(context.Background())
+// Start begins the background session eviction goroutine.
+func (sm *SessionManager) Start() {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	if sm.cleanupStop != nil {
+		return
+	}
+	sm.cleanupStop = make(chan struct{})
+	go sm.cleanupLoop()
+}
+
+// Stop signals the background eviction goroutine to exit.
+func (sm *SessionManager) Stop() {
+	sm.mu.Lock()
+	stop := sm.cleanupStop
+	sm.cleanupStop = nil
+	sm.mu.Unlock()
+	if stop != nil {
+		close(stop)
+	}
+}
+
+func (sm *SessionManager) cleanupLoop() {
+	ticker := time.NewTicker(sm.cleanupInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			sm.evictStaleSessions()
+		case <-sm.cleanupStop:
+			return
+		}
+	}
+}
+
+func (sm *SessionManager) evictStaleSessions() {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	cutoff := time.Now().Add(-sm.ttl)
+	for key, s := range sm.sessions {
+		s.mu.RLock()
+		lastUsed := s.lastUsed
+		s.mu.RUnlock()
+		if lastUsed.Before(cutoff) {
+			delete(sm.sessions, key)
+		}
+	}
+}
+
+func (sm *SessionManager) getOrCreateSession(key string) (*Session, error) {
+	sm.mu.RLock()
+	s, ok := sm.sessions[key]
+	sm.mu.RUnlock()
+	if ok {
+		s.mu.Lock()
+		s.lastUsed = time.Now()
+		s.mu.Unlock()
+		return s, nil
+	}
+
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	if s, ok := sm.sessions[key]; ok {
+		s.lastUsed = time.Now()
+		return s, nil
+	}
+
+	mem := NewInMemoryMemory()
+	a, err := buildAgentWithMemory(sm.cfg, sm.tools, mem)
+	if err != nil {
+		return nil, err
+	}
+
+	s = &Session{
+		agent:           a,
+		mem:             mem,
+		activatedSkills: make(map[string]bool),
+		lastUsed:        time.Now(),
+		mgr:             sm,
+	}
+	sm.sessions[key] = s
+	return s, nil
+}
+
+// ClearHistory evicts the session from the registry entirely.
+func (sm *SessionManager) ClearHistory(sessionKey string) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	delete(sm.sessions, sessionKey)
+	return nil
 }
 
 // ActivateSkill reads a skill's SKILL.md and injects it into the conversation
 // memory as a system message. If the skill is already loaded, it returns
 // commands.ErrSkillAlreadyLoaded.
-func (sm *SessionManager) ActivateSkill(skillName string) error {
-	if sm.activatedSkills[skillName] {
+func (sm *SessionManager) ActivateSkill(sessionKey, skillName string) error {
+	s, err := sm.getOrCreateSession(sessionKey)
+	if err != nil {
+		return err
+	}
+
+	if s.activatedSkills[skillName] {
 		return commands.ErrSkillAlreadyLoaded
 	}
 
@@ -200,11 +303,11 @@ func (sm *SessionManager) ActivateSkill(skillName string) error {
 		Role:    interfaces.MessageRoleSystem,
 		Content: skillContent,
 	}
-	if err := sm.mem.AddMessage(context.Background(), msg); err != nil {
+	if err := s.mem.AddMessage(context.Background(), msg); err != nil {
 		return fmt.Errorf("inject skill into memory: %w", err)
 	}
 
-	sm.activatedSkills[skillName] = true
+	s.activatedSkills[skillName] = true
 	return nil
 }
 
@@ -256,29 +359,56 @@ func (sm *SessionManager) ToolNames() []string {
 	return names
 }
 
-// GetMessages returns all messages in the session memory.
-func (sm *SessionManager) GetMessages(ctx context.Context) ([]interfaces.Message, error) {
-	return sm.mem.GetMessages(ctx)
+// GetMessages returns all messages in the specified session memory.
+func (sm *SessionManager) GetMessages(sessionKey string, ctx context.Context) ([]interfaces.Message, error) {
+	sm.mu.RLock()
+	s, ok := sm.sessions[sessionKey]
+	sm.mu.RUnlock()
+	if !ok {
+		return nil, nil
+	}
+	return s.mem.GetMessages(ctx)
 }
 
 // Chat runs a single turn against the agent and returns the response.
 // Bypasses the bus — useful for CLI REPL.
 func (sm *SessionManager) Chat(ctx context.Context, input string) (string, error) {
 	actx := exec.WithChatID(ctx, "cli")
-	return sm.agent.Run(actx, input)
+	s, err := sm.getOrCreateSession("cli:local")
+	if err != nil {
+		return "", err
+	}
+	return s.agent.Run(actx, input)
 }
 
 // Dispatch processes a single inbound message through the agent.
 // Called by the gateway after command filtering and local execution.
 func (sm *SessionManager) Dispatch(ctx context.Context, msg bus.InboundMessage) {
-	sm.handleInbound(ctx, msg)
+	key := computeSessionKey(msg)
+	s, err := sm.getOrCreateSession(key)
+	if err != nil {
+		logger.ErrorCF("agent", "Failed to create session", map[string]any{"session_key": key, "error": err.Error()})
+		if sm.bus != nil {
+			_ = sm.bus.PublishOutbound(ctx, bus.OutboundMessage{
+				Channel: msg.Channel,
+				ChatID:  msg.ChatID,
+				Content: fmt.Sprintf("Error: %v", err),
+			})
+		}
+		return
+	}
+	s.handleInbound(ctx, msg, key)
 }
 
-func (sm *SessionManager) handleInbound(ctx context.Context, msg bus.InboundMessage) {
-	chatID := msg.Context.ChatID
-	if chatID == "" {
-		chatID = msg.ChatID
+func computeSessionKey(msg bus.InboundMessage) string {
+	if msg.SessionKey != "" {
+		return msg.SessionKey
 	}
+	return msg.Channel + ":" + msg.ChatID
+}
+
+func (s *Session) handleInbound(ctx context.Context, msg bus.InboundMessage, sessionKey string) {
+	chatID := msg.ChatID
 
 	// Attach chat ID to context for tool use.
 	actx := exec.WithChatID(ctx, chatID)
@@ -289,8 +419,8 @@ func (sm *SessionManager) handleInbound(ctx context.Context, msg bus.InboundMess
 	if len(msg.Media) > 0 {
 		paths := make([]string, 0, len(msg.Media))
 		for _, ref := range msg.Media {
-			if sm.mediaStore != nil && strings.HasPrefix(ref, "media://") {
-				if p, err := sm.mediaStore.Resolve(ref); err == nil {
+			if s.mgr.mediaStore != nil && strings.HasPrefix(ref, "media://") {
+				if p, err := s.mgr.mediaStore.Resolve(ref); err == nil {
 					paths = append(paths, p)
 					continue
 				}
@@ -312,44 +442,50 @@ func (sm *SessionManager) handleInbound(ctx context.Context, msg bus.InboundMess
 	})
 
 	start := time.Now()
-	sm.emitProgress(ctx, ProgressEvent{Channel: msg.Channel, ChatID: chatID, Kind: ProgressTurnStarted})
+	s.mgr.emitProgress(ctx, ProgressEvent{Channel: msg.Channel, ChatID: chatID, Kind: ProgressTurnStarted})
 
-	response, err := sm.agent.Run(actx, input)
+	response, err := s.agent.Run(actx, input)
 	if err != nil {
 		logger.ErrorCF("agent", "Agent run failed", map[string]any{"error": err.Error()})
-		_ = sm.bus.PublishOutbound(ctx, bus.OutboundMessage{
-			Channel: msg.Channel,
-			ChatID:  chatID,
-			Content: fmt.Sprintf("Error: %v", err),
-		})
-		sm.emitProgress(ctx, ProgressEvent{Channel: msg.Channel, ChatID: chatID, Kind: ProgressFailed, Error: err, Elapsed: time.Since(start)})
-		sm.emitSummary(ctx, ProgressSummary{
-			Channel:   msg.Channel,
-			ChatID:    chatID,
-			Success:   false,
-			Duration:  time.Since(start),
-			Error:     err,
+		if s.mgr.bus != nil {
+			_ = s.mgr.bus.PublishOutbound(ctx, bus.OutboundMessage{
+				Channel:    msg.Channel,
+				ChatID:     chatID,
+				SessionKey: sessionKey,
+				Content:    fmt.Sprintf("Error: %v", err),
+			})
+		}
+		s.mgr.emitProgress(ctx, ProgressEvent{Channel: msg.Channel, ChatID: chatID, Kind: ProgressFailed, Error: err, Elapsed: time.Since(start)})
+		s.mgr.emitSummary(ctx, ProgressSummary{
+			Channel:  msg.Channel,
+			ChatID:   chatID,
+			Success:  false,
+			Duration: time.Since(start),
+			Error:    err,
 		})
 		return
 	}
 
 	if response != "" {
-		_ = sm.bus.PublishOutbound(ctx, bus.OutboundMessage{
-			Channel: msg.Channel,
-			ChatID:  chatID,
-			Content: response,
-		})
+		if s.mgr.bus != nil {
+			_ = s.mgr.bus.PublishOutbound(ctx, bus.OutboundMessage{
+				Channel:    msg.Channel,
+				ChatID:     chatID,
+				SessionKey: sessionKey,
+				Content:    response,
+			})
+		}
 	}
-	sm.emitProgress(ctx, ProgressEvent{Channel: msg.Channel, ChatID: chatID, Kind: ProgressCompleted, Elapsed: time.Since(start)})
-	sm.emitSummary(ctx, ProgressSummary{
-		Channel:   msg.Channel,
-		ChatID:    chatID,
-		Success:   true,
-		Duration:  time.Since(start),
+	s.mgr.emitProgress(ctx, ProgressEvent{Channel: msg.Channel, ChatID: chatID, Kind: ProgressCompleted, Elapsed: time.Since(start)})
+	s.mgr.emitSummary(ctx, ProgressSummary{
+		Channel:  msg.Channel,
+		ChatID:   chatID,
+		Success:  true,
+		Duration: time.Since(start),
 	})
 }
 
-func (sm *SessionManager) runStreamingTurn(
+func (s *Session) runStreamingTurn(
 	actx context.Context,
 	outCtx context.Context,
 	channel string,
@@ -357,21 +493,21 @@ func (sm *SessionManager) runStreamingTurn(
 	input string,
 	start time.Time,
 ) (string, *interfaces.TokenUsage, int, error) {
-	events, err := sm.agent.RunStream(actx, input)
+	events, err := s.agent.RunStream(actx, input)
 	if err != nil {
-		sm.emitProgress(outCtx, ProgressEvent{Channel: channel, ChatID: chatID, Kind: ProgressFallback, Error: err, Elapsed: time.Since(start)})
-		return sm.runDetailedTurn(actx, input)
+		s.mgr.emitProgress(outCtx, ProgressEvent{Channel: channel, ChatID: chatID, Kind: ProgressFallback, Error: err, Elapsed: time.Since(start)})
+		return s.runDetailedTurn(actx, input)
 	}
 	if events == nil {
 		err := errors.New("agent stream returned nil event channel")
-		sm.emitProgress(outCtx, ProgressEvent{Channel: channel, ChatID: chatID, Kind: ProgressFallback, Error: err, Elapsed: time.Since(start)})
-		return sm.runDetailedTurn(actx, input)
+		s.mgr.emitProgress(outCtx, ProgressEvent{Channel: channel, ChatID: chatID, Kind: ProgressFallback, Error: err, Elapsed: time.Since(start)})
+		return s.runDetailedTurn(actx, input)
 	}
 
 	var streamer bus.Streamer
 	var hasStreamer bool
-	if sm.bus != nil {
-		streamer, hasStreamer = sm.bus.GetStreamer(outCtx, channel, chatID)
+	if s.mgr.bus != nil {
+		streamer, hasStreamer = s.mgr.bus.GetStreamer(outCtx, channel, chatID)
 	}
 
 	var sb strings.Builder
@@ -380,7 +516,7 @@ func (sm *SessionManager) runStreamingTurn(
 	var streamErr error
 	firstActivity := false
 	lastActivity := time.Now()
-	heartbeatInterval := sm.heartbeatInterval()
+	heartbeatInterval := s.mgr.heartbeatInterval()
 	heartbeat := time.NewTimer(heartbeatInterval)
 	defer heartbeat.Stop()
 
@@ -400,7 +536,7 @@ func (sm *SessionManager) runStreamingTurn(
 			}
 			if !firstActivity {
 				firstActivity = true
-				sm.emitProgress(outCtx, ProgressEvent{Channel: channel, ChatID: chatID, Kind: ProgressFirstActivity, Elapsed: time.Since(start)})
+				s.mgr.emitProgress(outCtx, ProgressEvent{Channel: channel, ChatID: chatID, Kind: ProgressFirstActivity, Elapsed: time.Since(start)})
 			}
 			switch event.Type {
 			case interfaces.AgentEventContent:
@@ -412,7 +548,7 @@ func (sm *SessionManager) runStreamingTurn(
 				}
 			case interfaces.AgentEventToolCall:
 				toolCalls++
-				sm.emitProgress(outCtx, ProgressEvent{
+				s.mgr.emitProgress(outCtx, ProgressEvent{
 					Channel:  channel,
 					ChatID:   chatID,
 					Kind:     ProgressToolCallStarted,
@@ -420,7 +556,7 @@ func (sm *SessionManager) runStreamingTurn(
 					Elapsed:  time.Since(start),
 				})
 			case interfaces.AgentEventToolResult:
-				sm.emitProgress(outCtx, ProgressEvent{
+				s.mgr.emitProgress(outCtx, ProgressEvent{
 					Channel:  channel,
 					ChatID:   chatID,
 					Kind:     ProgressToolCallFinished,
@@ -444,7 +580,7 @@ func (sm *SessionManager) runStreamingTurn(
 				return sb.String(), usage, toolCalls, streamErr
 			}
 		case <-heartbeat.C:
-			sm.emitProgress(outCtx, ProgressEvent{
+			s.mgr.emitProgress(outCtx, ProgressEvent{
 				Channel: channel,
 				ChatID:  chatID,
 				Kind:    ProgressHeartbeat,
@@ -460,8 +596,8 @@ func (sm *SessionManager) runStreamingTurn(
 	}
 }
 
-func (sm *SessionManager) runDetailedTurn(ctx context.Context, input string) (string, *interfaces.TokenUsage, int, error) {
-	response, err := sm.agent.RunDetailed(ctx, input)
+func (s *Session) runDetailedTurn(ctx context.Context, input string) (string, *interfaces.TokenUsage, int, error) {
+	response, err := s.agent.RunDetailed(ctx, input)
 	if err != nil {
 		return "", nil, 0, err
 	}

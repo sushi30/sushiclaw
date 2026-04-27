@@ -75,11 +75,18 @@ func buildAgentWithMemory(cfg *config.Config, tools []interfaces.Tool, mem *InMe
 	}
 
 	toolNames := make([]string, len(tools))
+	hasMessageTool := false
 	for i, t := range tools {
 		toolNames[i] = t.Name()
+		if t.Name() == "message_tool" {
+			hasMessageTool = true
+		}
 	}
 	if len(tools) == 0 {
 		systemPrompt += "\n\nIMPORTANT: You have no tools available. You cannot execute commands, run code, or take real-world actions. If asked to do any of these, tell the user you are unable to in the current configuration — do not simulate or pretend to execute anything."
+	}
+	if hasMessageTool {
+		systemPrompt += "\n\nYou have access to message_tool. Use it to send short progress updates to the user during long-running tasks, especially when the user asked to be kept updated or when you reach a meaningful milestone. Do not overuse it; wait for meaningful progress before sending an update."
 	}
 	logger.DebugCF("agent", "Building agent", map[string]any{
 		"workspace":     cfg.WorkspacePath(),

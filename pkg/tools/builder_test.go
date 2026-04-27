@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/Ingenimax/agent-sdk-go/pkg/interfaces"
+	"github.com/sushi30/sushiclaw/pkg/bus"
 	"github.com/sushi30/sushiclaw/pkg/config"
 	"github.com/sushi30/sushiclaw/pkg/tools"
 )
@@ -28,7 +29,7 @@ func TestNewGatewayTools_RegistersFileToolsWithoutExecAllowlist(t *testing.T) {
 	cfg.Tools.ReadFile.Enabled = true
 	cfg.Tools.ListDir.Enabled = true
 
-	built, err := tools.NewGatewayTools(cfg, nil, nil)
+	built, err := tools.NewGatewayTools(cfg, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewGatewayTools: %v", err)
 	}
@@ -44,7 +45,7 @@ func TestNewGatewayTools_RegistersTrustedExecWithAllowlist(t *testing.T) {
 	cfg := newToolsConfig(t)
 	cfg.Tools.Exec.Enabled = true
 
-	built, err := tools.NewGatewayTools(cfg, []string{"chat-1"}, nil)
+	built, err := tools.NewGatewayTools(cfg, []string{"chat-1"}, nil, nil)
 	if err != nil {
 		t.Fatalf("NewGatewayTools: %v", err)
 	}
@@ -70,13 +71,29 @@ func TestNewGatewayTools_RegistersVisionFromModelListReference(t *testing.T) {
 	cfg.Tools.Vision.Enabled = true
 	cfg.Tools.Vision.ModelName = "vision-model"
 
-	built, err := tools.NewGatewayTools(cfg, nil, nil)
+	built, err := tools.NewGatewayTools(cfg, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewGatewayTools: %v", err)
 	}
 
 	got := toolNames(built)
 	want := []string{"vision"}
+	if !equalStrings(got, want) {
+		t.Fatalf("tool names = %v, want %v", got, want)
+	}
+}
+
+func TestNewGatewayTools_RegistersMessageToolWhenEnabled(t *testing.T) {
+	cfg := newToolsConfig(t)
+	cfg.Tools.Message.Enabled = true
+
+	built, err := tools.NewGatewayTools(cfg, nil, nil, bus.NewMessageBus())
+	if err != nil {
+		t.Fatalf("NewGatewayTools: %v", err)
+	}
+
+	got := toolNames(built)
+	want := []string{"message_tool"}
 	if !equalStrings(got, want) {
 		t.Fatalf("tool names = %v, want %v", got, want)
 	}

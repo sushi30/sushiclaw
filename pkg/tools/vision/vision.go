@@ -24,12 +24,12 @@ const defaultMaxTokens = 1024
 
 // VisionTool calls a vision-capable LLM to describe an image.
 type VisionTool struct {
-	model       string
-	apiKey      string
-	apiBase     string
+	model         string
+	apiKey        string
+	apiBase       string
 	defaultPrompt string
-	client      *http.Client
-	mediaStore  media.MediaStore
+	client        *http.Client
+	mediaStore    media.MediaStore
 }
 
 // Args is the expected JSON shape from the agent.
@@ -85,8 +85,10 @@ func NewTool(cfg config.VisionToolConfig, defaultModelCfg *config.ModelConfig, s
 	}, nil
 }
 
-func (t *VisionTool) Name() string        { return "vision" }
-func (t *VisionTool) Description() string { return "Analyze an image using a vision-capable LLM and return a text description." }
+func (t *VisionTool) Name() string { return "vision" }
+func (t *VisionTool) Description() string {
+	return "Analyze an image using a vision-capable LLM and return a text description."
+}
 
 func (t *VisionTool) Parameters() map[string]interfaces.ParameterSpec {
 	return map[string]interfaces.ParameterSpec{

@@ -91,6 +91,7 @@ type ToolsConfig struct {
 	ListDir      ToolConfig          `json:"list_dir"`
 	WebSearch    WebSearchToolConfig `json:"web_search"`
 	Vision       VisionToolConfig    `json:"vision"`
+	Message      MessageToolConfig   `json:"message"`
 }
 
 func (t ToolsConfig) IsToolEnabled(name string) bool {
@@ -109,6 +110,8 @@ func (t ToolsConfig) IsToolEnabled(name string) bool {
 		return t.WebSearch.Enabled
 	case "vision":
 		return t.Vision.Enabled
+	case "message":
+		return t.Message.Enabled
 	}
 	return false
 }
@@ -175,6 +178,11 @@ type VisionToolConfig struct {
 	APIKey    *SecureString `json:"api_key,omitzero"`
 	APIBase   string        `json:"api_base,omitempty"`
 	Prompt    string        `json:"prompt,omitempty"`
+}
+
+type MessageToolConfig struct {
+	Enabled     bool `json:"enabled"`
+	MinInterval int  `json:"min_interval_seconds,omitempty"`
 }
 
 // APIKeyString returns the resolved API key.

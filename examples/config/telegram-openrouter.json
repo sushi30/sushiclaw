@@ -53,6 +53,10 @@
       "model_name": "openrouter-glm-5v",
       "prompt": "Describe this image in detail."
     },
+    "message": {
+      "enabled": true,
+      "min_interval_seconds": 5
+    },
     "media_cleanup": {
       "enabled": true,
       "max_age": 30,

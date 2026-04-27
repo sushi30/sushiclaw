@@ -47,6 +47,15 @@ type InboundMessage struct {
 	MessageID string `json:"message_id,omitempty"`
 }
 
+// ContextUsage describes how much of the model's context window the current
+// session consumes, and how far it is from triggering compression.
+type ContextUsage struct {
+	UsedTokens       int `json:"used_tokens"`
+	TotalTokens      int `json:"total_tokens"`       // model context window
+	CompressAtTokens int `json:"compress_at_tokens"` // threshold that triggers compression
+	UsedPercent      int `json:"used_percent"`       // 0-100
+}
+
 // OutboundScope captures structured session scope without depending on the session package.
 type OutboundScope struct {
 	Version    int               `json:"version,omitempty"`
@@ -64,6 +73,7 @@ type OutboundMessage struct {
 	AgentID          string         `json:"agent_id,omitempty"`
 	SessionKey       string         `json:"session_key,omitempty"`
 	Scope            *OutboundScope `json:"scope,omitempty"`
+	ContextUsage     *ContextUsage  `json:"context_usage,omitempty"`
 	Content          string         `json:"content"`
 	ReplyToMessageID string         `json:"reply_to_message_id,omitempty"`
 }

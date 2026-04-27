@@ -1,0 +1,65 @@
+package websocket
+
+import "time"
+
+// Protocol message types.
+const (
+	// TypeMessageSend is sent from client to server.
+	TypeMessageSend = "message.send"
+	TypeMediaSend   = "media.send"
+	TypePing        = "ping"
+
+	// TypeMessageCreate is sent from server to client.
+	TypeMessageCreate = "message.create"
+	TypeMessageUpdate = "message.update"
+	TypeMessageDelete = "message.delete"
+	TypeMediaCreate   = "media.create"
+	TypeTypingStart   = "typing.start"
+	TypeTypingStop    = "typing.stop"
+	TypeError         = "error"
+	TypePong          = "pong"
+
+	PayloadKeyContent = "content"
+	PayloadKeyThought = "thought"
+
+	MessageKindThought = "thought"
+)
+
+// WebSocketMessage is the wire format for all Pico Protocol messages.
+type WebSocketMessage struct {
+	Type      string         `json:"type"`
+	ID        string         `json:"id,omitempty"`
+	SessionID string         `json:"session_id,omitempty"`
+	Timestamp int64          `json:"timestamp,omitempty"`
+	Payload   map[string]any `json:"payload,omitempty"`
+}
+
+// newMessage creates a WebSocketMessage with the given type and payload.
+func newMessage(msgType string, payload map[string]any) WebSocketMessage {
+	return WebSocketMessage{
+		Type:      msgType,
+		Timestamp: time.Now().UnixMilli(),
+		Payload:   payload,
+	}
+}
+
+func isThoughtPayload(payload map[string]any) bool {
+	thought, _ := payload[PayloadKeyThought].(bool)
+	return thought
+}
+
+func newErrorWithPayload(code, message string, extra map[string]any) WebSocketMessage {
+	payload := map[string]any{
+		"code":    code,
+		"message": message,
+	}
+	for key, value := range extra {
+		payload[key] = value
+	}
+	return newMessage(TypeError, payload)
+}
+
+// newError creates an error WebSocketMessage.
+func newError(code, message string) WebSocketMessage {
+	return newErrorWithPayload(code, message, nil)
+}

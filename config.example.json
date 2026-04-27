@@ -60,6 +60,23 @@
       "poll_interval_secs": 30,
       "allow_from": [],
       "reasoning_channel_id": ""
+    },
+    "websocket": {
+      "enabled": false,
+      "type": "websocket",
+      "token": "env://PICO_TOKEN",
+      "allow_token_query": false,
+      "allow_origins": ["*"],
+      "ping_interval": 30,
+      "read_timeout": 60,
+      "write_timeout": 30,
+      "max_connections": 100,
+      "port": 18801,
+      "allow_from": ["*"],
+      "placeholder": {
+        "enabled": true,
+        "text": ["Thinking..."]
+      }
     }
   },
   "gateway": {

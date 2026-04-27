@@ -119,8 +119,7 @@ For Telegram image handling, enable the vision tool with a vision-capable model:
   "tools": {
     "vision": {
       "enabled": true,
-      "model": "openrouter/z-ai/glm-5v-turbo",
-      "api_key": "env://OPENROUTER_API_KEY"
+      "model_name": "openrouter-glm-5v"
     }
   }
 }

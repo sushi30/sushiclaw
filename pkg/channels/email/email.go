@@ -9,13 +9,9 @@ import (
 	"fmt"
 	"io"
 	"net/smtp"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/google/uuid"
 
 	imap "github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
@@ -26,7 +22,6 @@ import (
 	"github.com/sushi30/sushiclaw/pkg/channels"
 	"github.com/sushi30/sushiclaw/pkg/config"
 	"github.com/sushi30/sushiclaw/pkg/logger"
-	"github.com/sushi30/sushiclaw/pkg/media"
 )
 
 // EmailConfig holds configuration for the email channel.
@@ -266,34 +261,9 @@ func (c *EmailChannel) SendMedia(ctx context.Context, msg bus.OutboundMediaMessa
 		return nil, nil
 	}
 
-	store := c.GetMediaStore()
-	if store == nil {
-		return nil, fmt.Errorf("no media store available: %w", channels.ErrSendFailed)
-	}
-
-	var attachments []attachmentInfo
-	for _, part := range msg.Parts {
-		localPath, err := store.Resolve(part.Ref)
-		if err != nil {
-			return nil, fmt.Errorf("resolve media ref %q: %w: %w", part.Ref, err, channels.ErrSendFailed)
-		}
-		data, err := os.ReadFile(localPath)
-		if err != nil {
-			return nil, fmt.Errorf("read attachment %q: %w: %w", localPath, err, channels.ErrSendFailed)
-		}
-		ct := part.ContentType
-		if ct == "" {
-			ct = "application/octet-stream"
-		}
-		filename := part.Filename
-		if filename == "" {
-			filename = filepath.Base(localPath)
-		}
-		attachments = append(attachments, attachmentInfo{
-			filename:    filename,
-			contentType: ct,
-			data:        data,
-		})
+	attachments, err := newEmailMediaHandler(c.GetMediaStore()).outboundAttachments(msg.Parts)
+	if err != nil {
+		return nil, err
 	}
 
 	// Use the first non-empty caption as the email body.
@@ -663,41 +633,7 @@ func (c *EmailChannel) processEmail(ctx context.Context, envelope *imap.Envelope
 		metadata["reply_to_message_id"] = rawID
 	}
 
-	var mediaPaths []string
-	if store := c.GetMediaStore(); store != nil && len(attachments) > 0 {
-		if err := os.MkdirAll(media.TempDir(), 0o700); err != nil {
-			logger.WarnCF("email", "Failed to create media temp dir", map[string]any{
-				"err": err.Error(),
-				"dir": media.TempDir(),
-			})
-		} else {
-			scope := channels.BuildMediaScope("email", fromAddr, envelope.MessageID)
-			for _, att := range attachments {
-				localPath := filepath.Join(media.TempDir(), uuid.New().String()[:8]+"_"+att.filename)
-				if err := os.WriteFile(localPath, att.data, 0o600); err != nil {
-					logger.WarnCF("email", "Failed to write attachment", map[string]any{
-						"err":      err.Error(),
-						"filename": att.filename,
-					})
-					continue
-				}
-				ref, storeErr := store.Store(localPath, media.MediaMeta{
-					Filename:      att.filename,
-					ContentType:   att.contentType,
-					Source:        "email",
-					CleanupPolicy: media.CleanupPolicyDeleteOnCleanup,
-				}, scope)
-				if storeErr != nil {
-					logger.WarnCF("email", "Failed to store attachment", map[string]any{
-						"err":      storeErr.Error(),
-						"filename": att.filename,
-					})
-					continue
-				}
-			mediaPaths = append(mediaPaths, ref)
-			}
-		}
-	}
+	mediaPaths := newEmailMediaHandler(c.GetMediaStore()).storeInboundAttachments(fromAddr, envelope.MessageID, attachments)
 
 	sender := bus.SenderInfo{
 		Platform:    "email",
@@ -810,88 +746,6 @@ func extractBodyParts(r io.Reader) (text, references string) {
 	}
 
 	return "", references
-}
-
-// attachmentInfo holds a parsed email attachment before storage.
-type attachmentInfo struct {
-	filename    string
-	contentType string
-	data        []byte
-}
-
-// extractAttachments walks the MIME message and returns all attachment parts.
-func extractAttachments(r io.Reader) []attachmentInfo {
-	raw, err := io.ReadAll(r)
-	if err != nil {
-		return nil
-	}
-
-	mr, err := gomail.CreateReader(bytes.NewReader(raw))
-	if err != nil {
-		return nil
-	}
-
-	var attachments []attachmentInfo
-
-	for {
-		p, err := mr.NextPart()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			break
-		}
-		attachHeader, ok := p.Header.(*gomail.AttachmentHeader)
-		if !ok {
-			continue
-		}
-		filename, _ := attachHeader.Filename()
-		if filename == "" {
-			ct, _, _ := attachHeader.ContentType()
-			filename = fallbackFilename(ct)
-		}
-		data, _ := io.ReadAll(p.Body)
-		if len(data) == 0 {
-			continue
-		}
-		ct, _, _ := attachHeader.ContentType()
-		if ct == "" {
-			ct = "application/octet-stream"
-		}
-		attachments = append(attachments, attachmentInfo{
-			filename:    filename,
-			contentType: ct,
-			data:        data,
-		})
-	}
-
-	return attachments
-}
-
-// fallbackFilename generates a filename from a MIME type when none is provided.
-func fallbackFilename(ct string) string {
-	ext := "bin"
-	switch ct {
-	case "text/plain":
-		ext = "txt"
-	case "text/html":
-		ext = "html"
-	case "image/jpeg", "image/jpg":
-		ext = "jpg"
-	case "image/png":
-		ext = "png"
-	case "image/gif":
-		ext = "gif"
-	case "image/webp":
-		ext = "webp"
-	case "application/pdf":
-		ext = "pdf"
-	case "application/zip":
-		ext = "zip"
-	case "application/json":
-		ext = "json"
-	}
-	return fmt.Sprintf("attachment.%s", ext)
 }
 
 func isCalendarRSVP(envelope *imap.Envelope, raw []byte) bool {

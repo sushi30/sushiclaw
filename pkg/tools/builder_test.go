@@ -56,6 +56,32 @@ func TestNewGatewayTools_RegistersTrustedExecWithAllowlist(t *testing.T) {
 	}
 }
 
+func TestNewGatewayTools_RegistersVisionFromModelListReference(t *testing.T) {
+	cfg := newToolsConfig(t)
+	cfg.Agents.Defaults.ModelName = "text-model"
+	cfg.ModelList = []config.ModelConfig{
+		{ModelName: "text-model", Model: "openrouter/z-ai/glm-4.5"},
+		{
+			ModelName: "vision-model",
+			Model:     "openrouter/z-ai/glm-5v-turbo",
+			APIKey:    config.NewSecureString("test-key"),
+		},
+	}
+	cfg.Tools.Vision.Enabled = true
+	cfg.Tools.Vision.ModelName = "vision-model"
+
+	built, err := tools.NewGatewayTools(cfg, nil, nil)
+	if err != nil {
+		t.Fatalf("NewGatewayTools: %v", err)
+	}
+
+	got := toolNames(built)
+	want := []string{"vision"}
+	if !equalStrings(got, want) {
+		t.Fatalf("tool names = %v, want %v", got, want)
+	}
+}
+
 func newToolsConfig(t *testing.T) *config.Config {
 	t.Helper()
 	return &config.Config{

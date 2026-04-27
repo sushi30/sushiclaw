@@ -170,11 +170,12 @@ type BaiduSearchConfig struct {
 }
 
 type VisionToolConfig struct {
-	Enabled bool          `json:"enabled"`
-	Model   string        `json:"model"`
-	APIKey  *SecureString `json:"api_key,omitzero"`
-	APIBase string        `json:"api_base,omitempty"`
-	Prompt  string        `json:"prompt,omitempty"`
+	Enabled   bool          `json:"enabled"`
+	ModelName string        `json:"model_name,omitempty"`
+	Model     string        `json:"model"`
+	APIKey    *SecureString `json:"api_key,omitzero"`
+	APIBase   string        `json:"api_base,omitempty"`
+	Prompt    string        `json:"prompt,omitempty"`
 }
 
 // APIKeyString returns the resolved API key.

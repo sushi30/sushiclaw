@@ -22,7 +22,7 @@ func NewChatTools(cfg *config.Config) []interfaces.Tool {
 		}
 	}
 	if cfg.Tools.IsToolEnabled("vision") {
-		if tool, err := vision.NewTool(cfg.Tools.Vision, defaultModel(cfg), nil); err == nil {
+		if tool, err := vision.NewTool(cfg.Tools.Vision, visionModel(cfg), nil); err == nil {
 			out = append(out, tool)
 		}
 	}
@@ -40,7 +40,7 @@ func NewGatewayTools(cfg *config.Config, execAllowedSenders []string, store medi
 		out = append(out, trustedExec)
 	}
 	if cfg.Tools.IsToolEnabled("vision") {
-		if tool, err := vision.NewTool(cfg.Tools.Vision, defaultModel(cfg), store); err == nil {
+		if tool, err := vision.NewTool(cfg.Tools.Vision, visionModel(cfg), store); err == nil {
 			out = append(out, tool)
 		}
 	}
@@ -80,6 +80,22 @@ func defaultModel(cfg *config.Config) *config.ModelConfig {
 		return nil
 	}
 	name := cfg.Agents.Defaults.ModelName
+	for i := range cfg.ModelList {
+		if cfg.ModelList[i].ModelName == name {
+			return &cfg.ModelList[i]
+		}
+	}
+	return nil
+}
+
+func visionModel(cfg *config.Config) *config.ModelConfig {
+	if cfg == nil {
+		return nil
+	}
+	name := cfg.Tools.Vision.ModelName
+	if name == "" {
+		return defaultModel(cfg)
+	}
 	for i := range cfg.ModelList {
 		if cfg.ModelList[i].ModelName == name {
 			return &cfg.ModelList[i]

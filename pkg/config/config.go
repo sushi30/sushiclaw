@@ -298,6 +298,7 @@ func (c *WebSocketClientSettings) SetToken(token string) {
 
 // VoiceConfig holds voice/ASR settings.
 type VoiceConfig struct {
+	Enabled           bool   `json:"enabled"`
 	ModelName         string `json:"model_name,omitempty"`
 	TTSModelName      string `json:"tts_model_name,omitempty"`
 	EchoTranscription bool   `json:"echo_transcription"`

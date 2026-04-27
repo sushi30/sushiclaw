@@ -27,6 +27,9 @@ type TranscriptionResponse struct {
 // It looks up cfg.Voice.ModelName in cfg.ModelList and creates the appropriate implementation.
 func DetectTranscriber(cfg *config.Config) Transcriber {
 	voiceCfg := cfg.Voice()
+	if !voiceCfg.Enabled {
+		return nil
+	}
 	if voiceCfg.ModelName == "" {
 		return nil
 	}

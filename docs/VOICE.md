@@ -34,14 +34,16 @@ top-level `voice` block:
     }
   ],
   "voice": {
+    "enabled": true,
     "model_name": "whisper-1",
     "echo_transcription": false
   }
 }
 ```
 
-`voice.model_name` must match a `model_list[].model_name` entry. If it is empty,
-voice transcription is disabled.
+`voice.enabled` must be `true` for transcription to run. `voice.model_name`
+must match a `model_list[].model_name` entry. If `voice.enabled` is `false`
+or `voice.model_name` is empty, voice transcription is disabled.
 
 ## Providers
 

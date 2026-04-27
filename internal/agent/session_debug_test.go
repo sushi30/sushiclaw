@@ -19,9 +19,17 @@ type mockRunner struct {
 	streamErr   error
 	detailed    *interfaces.AgentResponse
 	detailedErr error
+	runResult   string
+	runErr      error
 }
 
 func (m *mockRunner) Run(context.Context, string) (string, error) {
+	if m.runErr != nil {
+		return "", m.runErr
+	}
+	if m.runResult != "" {
+		return m.runResult, nil
+	}
 	return "", errors.New("Run should not be called")
 }
 
@@ -60,23 +68,17 @@ func (c *collectingProgress) Summary(_ context.Context, summary ProgressSummary)
 }
 
 func TestSessionManagerDebugStartCompletionAndSummary(t *testing.T) {
-	events := streamEvents(
-		interfaces.AgentStreamEvent{Type: interfaces.AgentEventContent, Content: "hello"},
-		interfaces.AgentStreamEvent{Type: interfaces.AgentEventComplete},
-	)
 	extBus := bus.NewMessageBus()
 	progress := &collectingProgress{}
-	sm := &SessionManager{agent: &mockRunner{stream: events}, bus: extBus, progress: progress}
+	sm := &SessionManager{agent: &mockRunner{runResult: "hello"}, bus: extBus, progress: progress}
 
 	sm.handleInbound(t.Context(), inbound("telegram", "chat1", "hi"))
 
 	msg := requireOutboundMessage(t, extBus)
 	assert.Equal(t, "hello", msg.Content)
-	assertEventKinds(t, progress.events, ProgressTurnStarted, ProgressFirstActivity, ProgressCompleted)
+	assertEventKinds(t, progress.events, ProgressTurnStarted, ProgressCompleted)
 	require.Len(t, progress.summaries, 1)
 	assert.True(t, progress.summaries[0].Success)
-	assert.Equal(t, 0, progress.summaries[0].ToolCalls)
-	assert.Nil(t, progress.summaries[0].Usage)
 	assert.GreaterOrEqual(t, progress.summaries[0].Duration, time.Duration(0))
 }
 
@@ -98,15 +100,14 @@ func TestSessionManagerDebugToolEventsUseOnlyNames(t *testing.T) {
 		},
 		interfaces.AgentStreamEvent{Type: interfaces.AgentEventContent, Content: "done"},
 	)
-	extBus := bus.NewMessageBus()
 	progress := &collectingProgress{}
-	sm := &SessionManager{agent: &mockRunner{stream: events}, bus: extBus, progress: progress}
+	sm := &SessionManager{agent: &mockRunner{stream: events}, bus: bus.NewMessageBus(), progress: progress}
 
-	sm.handleInbound(t.Context(), inbound("telegram", "chat1", "run"))
+	response, _, toolCalls, err := sm.runStreamingTurn(t.Context(), t.Context(), "telegram", "chat1", "run", time.Now())
 
-	requireOutboundMessage(t, extBus)
-	require.Len(t, progress.summaries, 1)
-	assert.Equal(t, 1, progress.summaries[0].ToolCalls)
+	require.NoError(t, err)
+	assert.Equal(t, "done", response)
+	assert.Equal(t, 1, toolCalls)
 
 	var toolEvents []ProgressEvent
 	for _, event := range progress.events {
@@ -138,13 +139,13 @@ func TestSessionManagerDebugTokenSummaryFromStreamMetadata(t *testing.T) {
 	progress := &collectingProgress{}
 	sm := &SessionManager{agent: &mockRunner{stream: events}, bus: bus.NewMessageBus(), progress: progress}
 
-	sm.handleInbound(t.Context(), inbound("telegram", "chat1", "tokens"))
+	_, usage, _, err := sm.runStreamingTurn(t.Context(), t.Context(), "telegram", "chat1", "tokens", time.Now())
 
-	require.Len(t, progress.summaries, 1)
-	require.NotNil(t, progress.summaries[0].Usage)
-	assert.Equal(t, 4, progress.summaries[0].Usage.InputTokens)
-	assert.Equal(t, 6, progress.summaries[0].Usage.OutputTokens)
-	assert.Equal(t, 10, progress.summaries[0].Usage.TotalTokens)
+	require.NoError(t, err)
+	require.NotNil(t, usage)
+	assert.Equal(t, 4, usage.InputTokens)
+	assert.Equal(t, 6, usage.OutputTokens)
+	assert.Equal(t, 10, usage.TotalTokens)
 }
 
 func TestSessionManagerDebugHeartbeatAfterSilence(t *testing.T) {
@@ -157,36 +158,32 @@ func TestSessionManagerDebugHeartbeatAfterSilence(t *testing.T) {
 	progress := &collectingProgress{heartbeat: 10 * time.Millisecond}
 	sm := &SessionManager{agent: &mockRunner{stream: ch}, bus: bus.NewMessageBus(), progress: progress}
 
-	sm.handleInbound(t.Context(), inbound("telegram", "chat1", "slow"))
+	_, _, _, err := sm.runStreamingTurn(t.Context(), t.Context(), "telegram", "chat1", "slow", time.Now())
 
+	require.NoError(t, err)
 	assertHasEvent(t, progress.events, ProgressHeartbeat)
 }
 
-func TestSessionManagerStreamErrorPublishesOneUserErrorAndFailureSummary(t *testing.T) {
-	streamErr := errors.New("stream failed")
-	events := streamEvents(
-		interfaces.AgentStreamEvent{Type: interfaces.AgentEventContent, Content: "partial"},
-		interfaces.AgentStreamEvent{Type: interfaces.AgentEventError, Error: streamErr},
-	)
+func TestSessionManagerRunErrorPublishesOneUserErrorAndFailureSummary(t *testing.T) {
+	runErr := errors.New("run failed")
 	extBus := bus.NewMessageBus()
 	progress := &collectingProgress{}
-	sm := &SessionManager{agent: &mockRunner{stream: events}, bus: extBus, progress: progress}
+	sm := &SessionManager{agent: &mockRunner{runErr: runErr}, bus: extBus, progress: progress}
 
 	sm.handleInbound(t.Context(), inbound("telegram", "chat1", "bad"))
 
 	msg := requireOutboundMessage(t, extBus)
-	assert.Equal(t, "Error: stream failed", msg.Content)
+	assert.Equal(t, "Error: run failed", msg.Content)
 	assertNoOutboundMessage(t, extBus)
 	require.Len(t, progress.summaries, 1)
 	assert.False(t, progress.summaries[0].Success)
-	assert.ErrorIs(t, progress.summaries[0].Error, streamErr)
+	assert.ErrorIs(t, progress.summaries[0].Error, runErr)
 	assertHasEvent(t, progress.events, ProgressFailed)
 }
 
 func TestSessionManagerStreamingStartupFallbackUsesDetailedUsage(t *testing.T) {
 	startErr := errors.New("no streaming")
 	progress := &collectingProgress{}
-	extBus := bus.NewMessageBus()
 	sm := &SessionManager{
 		agent: &mockRunner{
 			streamErr: startErr,
@@ -199,19 +196,18 @@ func TestSessionManagerStreamingStartupFallbackUsesDetailedUsage(t *testing.T) {
 				},
 			},
 		},
-		bus:      extBus,
+		bus:      bus.NewMessageBus(),
 		progress: progress,
 	}
 
-	sm.handleInbound(t.Context(), inbound("telegram", "chat1", "fallback"))
+	response, usage, toolCalls, err := sm.runStreamingTurn(t.Context(), t.Context(), "telegram", "chat1", "fallback", time.Now())
 
-	assert.Equal(t, "fallback", requireOutboundMessage(t, extBus).Content)
+	require.NoError(t, err)
+	assert.Equal(t, "fallback", response)
 	assertHasEvent(t, progress.events, ProgressFallback)
-	require.Len(t, progress.summaries, 1)
-	assert.True(t, progress.summaries[0].Success)
-	assert.Equal(t, 2, progress.summaries[0].ToolCalls)
-	require.NotNil(t, progress.summaries[0].Usage)
-	assert.Equal(t, 15, progress.summaries[0].Usage.TotalTokens)
+	assert.Equal(t, 2, toolCalls)
+	require.NotNil(t, usage)
+	assert.Equal(t, 15, usage.TotalTokens)
 }
 
 func streamEvents(events ...interfaces.AgentStreamEvent) <-chan interfaces.AgentStreamEvent {

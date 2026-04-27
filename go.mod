@@ -10,6 +10,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/mdp/qrterminal/v3 v3.2.1
 	github.com/mymmrac/telego v1.8.0
+	github.com/robfig/cron/v3 v3.0.1
 	github.com/rs/zerolog v1.35.0
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1

@@ -9,6 +9,7 @@ import (
 	"github.com/Ingenimax/agent-sdk-go/pkg/interfaces"
 	"github.com/sushi30/sushiclaw/pkg/config"
 	"github.com/sushi30/sushiclaw/pkg/tools/exec"
+	"github.com/sushi30/sushiclaw/pkg/tools/toolctx"
 )
 
 // TrustedExecTool wraps exec.ExecTool to allow specific chat IDs to
@@ -45,7 +46,7 @@ func (t *TrustedExecTool) Parameters() map[string]interfaces.ParameterSpec {
 
 // Run executes the tool, dispatching to trusted or restricted based on chatID.
 func (t *TrustedExecTool) Run(ctx context.Context, input string) (string, error) {
-	chatID := exec.ChatIDFromContext(ctx)
+	chatID := toolctx.ChatIDFromContext(ctx)
 	if slices.Contains(t.allowedChatIDs, chatID) {
 		return t.trusted.Run(ctx, input)
 	}
@@ -54,7 +55,7 @@ func (t *TrustedExecTool) Run(ctx context.Context, input string) (string, error)
 
 // Execute executes the tool with args JSON string.
 func (t *TrustedExecTool) Execute(ctx context.Context, args string) (string, error) {
-	chatID := exec.ChatIDFromContext(ctx)
+	chatID := toolctx.ChatIDFromContext(ctx)
 	if slices.Contains(t.allowedChatIDs, chatID) {
 		return t.trusted.Execute(ctx, args)
 	}

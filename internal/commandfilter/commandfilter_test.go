@@ -51,6 +51,7 @@ func TestFilter_KnownCommandsWithArgs(t *testing.T) {
 	cases := []string{
 		"/show model",
 		"/list skills",
+		"/list cron",
 		"/switch model gpt-4o",
 		"/check channel telegram",
 		"/use python",

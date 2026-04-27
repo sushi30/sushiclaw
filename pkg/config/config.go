@@ -86,6 +86,7 @@ type GatewayConfig struct {
 type ToolsConfig struct {
 	MediaCleanup MediaCleanupCfg     `json:"media_cleanup"`
 	Exec         ExecToolConfig      `json:"exec"`
+	Cron         CronToolConfig      `json:"cron"`
 	ReadFile     ToolConfig          `json:"read_file"`
 	WriteFile    ToolConfig          `json:"write_file"`
 	ListDir      ToolConfig          `json:"list_dir"`
@@ -96,6 +97,8 @@ func (t ToolsConfig) IsToolEnabled(name string) bool {
 	switch name {
 	case "exec":
 		return t.Exec.Enabled
+	case "cron":
+		return t.Cron.Enabled
 	case "read_file":
 		return t.ReadFile.Enabled
 	case "write_file":
@@ -114,6 +117,12 @@ type ToolConfig struct {
 
 type ExecToolConfig struct {
 	Enabled bool `json:"enabled"`
+}
+
+type CronToolConfig struct {
+	Enabled            bool `json:"enabled"`
+	AllowCommand       bool `json:"allow_command"`
+	ExecTimeoutMinutes int  `json:"exec_timeout_minutes"`
 }
 
 type MediaCleanupCfg struct {

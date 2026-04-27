@@ -10,20 +10,19 @@ import (
 	"time"
 
 	"github.com/Ingenimax/agent-sdk-go/pkg/interfaces"
+	"github.com/sushi30/sushiclaw/pkg/tools/toolctx"
 )
 
-// Context key for chat ID.
-type chatIDKey struct{}
-
 // WithChatID returns a context with the chat ID set.
+// Deprecated: use toolctx.WithChatID instead.
 func WithChatID(ctx context.Context, chatID string) context.Context {
-	return context.WithValue(ctx, chatIDKey{}, chatID)
+	return toolctx.WithChatID(ctx, chatID)
 }
 
 // ChatIDFromContext returns the chat ID from the context, if any.
+// Deprecated: use toolctx.ChatIDFromContext instead.
 func ChatIDFromContext(ctx context.Context) string {
-	v, _ := ctx.Value(chatIDKey{}).(string)
-	return v
+	return toolctx.ChatIDFromContext(ctx)
 }
 
 // ExecTool runs shell commands.

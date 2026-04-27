@@ -65,6 +65,7 @@ type Runtime struct {
 	ListDefinitions func() []Definition
 	ListModels      func() []string
 	ListSkills      func() []SkillInfo
+	ListCronJobs    func() (string, error)
 	ClearHistory    func() error
 	SetDebug        func(ctx context.Context, channel, chatID, mode string) string
 	ActivateSkill   func(skillName string) error
@@ -262,6 +263,7 @@ func BuiltinDefinitions() []Definition {
 		{Name: "list", Description: "List available options", SubCommands: []SubCommand{
 			{Name: "models", Description: "List configured models", Handler: listModelsHandler},
 			{Name: "skills", Description: "List available skills", Handler: listSkillsHandler},
+			{Name: "cron", Description: "List scheduled cron jobs", Handler: listCronHandler},
 		}},
 		{Name: "use", Description: "Use a specific skill", Handler: useHandler, Usage: "/use <skill-name>"},
 		{Name: "btw", Description: "Add a note to conversation context"},
@@ -336,6 +338,17 @@ func listSkillsHandler(_ context.Context, req Request, rt *Runtime) error {
 		sb.WriteByte('\n')
 	}
 	return req.Reply(strings.TrimRight(sb.String(), "\n"))
+}
+
+func listCronHandler(_ context.Context, req Request, rt *Runtime) error {
+	if rt == nil || rt.ListCronJobs == nil {
+		return req.Reply("Cron job list unavailable.")
+	}
+	jobs, err := rt.ListCronJobs()
+	if err != nil {
+		return req.Reply("Failed to list cron jobs: " + err.Error())
+	}
+	return req.Reply(jobs)
 }
 
 func clearHandler(_ context.Context, req Request, rt *Runtime) error {

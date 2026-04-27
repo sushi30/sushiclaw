@@ -17,6 +17,7 @@ import (
 	"github.com/sushi30/sushiclaw/pkg/channels/email"
 	"github.com/sushi30/sushiclaw/pkg/commands"
 	"github.com/sushi30/sushiclaw/pkg/config"
+	"github.com/sushi30/sushiclaw/pkg/cron"
 	"github.com/sushi30/sushiclaw/pkg/logger"
 	"github.com/sushi30/sushiclaw/pkg/media"
 	sushitools "github.com/sushi30/sushiclaw/pkg/tools"
@@ -96,6 +97,27 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 		}
 	}
 
+	var cronScheduler *cron.Scheduler
+	if cfg.Tools.Cron.Enabled {
+		var err error
+		cronScheduler, err = cron.NewScheduler(cfg, messageBus)
+		if err != nil {
+			logger.WarnCF("gateway", "Failed to init cron scheduler",
+				map[string]any{"error": err.Error()})
+		}
+	}
+	if cronScheduler != nil && cfg.Tools.IsToolEnabled("cron") {
+		tools = append(tools, cron.NewCronTool(cronScheduler, cfg))
+		rt.ListCronJobs = func() (string, error) {
+			jobs, err := cronScheduler.ListJobs()
+			if err != nil {
+				return "", err
+			}
+			return cron.FormatJobs(jobs), nil
+		}
+		logger.InfoC("gateway", "Cron tool registered")
+	}
+
 	sessionMgr, err := agent.NewSessionManager(cfg, messageBus, tools, agent.WithProgressSink(dm))
 	if err != nil {
 		if allowEmptyStartup {
@@ -137,6 +159,11 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 
 	if err = cm.StartAll(context.Background()); err != nil {
 		return fmt.Errorf("error starting channels: %w", err)
+	}
+
+	if cronScheduler != nil {
+		cronScheduler.Start()
+		logger.InfoC("gateway", "Cron scheduler started")
 	}
 
 	fmt.Printf("Gateway started\n")
@@ -230,6 +257,10 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 	<-sigChan
 
 	logger.Info("Shutting down...")
+
+	if cronScheduler != nil {
+		cronScheduler.Stop()
+	}
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), gracefulShutdownTimeout)
 	defer shutdownCancel()

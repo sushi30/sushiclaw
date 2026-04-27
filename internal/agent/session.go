@@ -20,6 +20,7 @@ import (
 	"github.com/sushi30/sushiclaw/pkg/llm/openrouter"
 	"github.com/sushi30/sushiclaw/pkg/logger"
 	"github.com/sushi30/sushiclaw/pkg/tools/exec"
+	"github.com/sushi30/sushiclaw/pkg/tools/toolctx"
 )
 
 // SessionManager wraps an agent-sdk-go Agent and processes inbound bus messages.
@@ -278,6 +279,8 @@ func (sm *SessionManager) handleInbound(ctx context.Context, msg bus.InboundMess
 
 	// Attach chat ID to context for tool use.
 	actx := exec.WithChatID(ctx, chatID)
+	actx = toolctx.WithChannel(actx, msg.Channel)
+	actx = toolctx.WithSenderID(actx, msg.SenderID)
 
 	input := msg.Content
 	if input == "" && len(msg.Media) > 0 {

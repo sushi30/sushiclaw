@@ -62,14 +62,17 @@ type SkillInfo struct {
 
 // Runtime provides runtime dependencies to command handlers.
 type Runtime struct {
-	GetModelInfo    func() (name, provider string)
-	ListDefinitions func() []Definition
-	ListModels      func() []string
-	ListSkills      func() []SkillInfo
-	ListCronJobs    func() (string, error)
-	ClearHistory    func(req Request) error
-	SetDebug        func(ctx context.Context, channel, chatID, mode string) string
-	ActivateSkill   func(req Request, skillName string) error
+	GetModelInfo     func() (name, provider string)
+	ListDefinitions  func() []Definition
+	ListModels       func() []string
+	ListSkills       func() []SkillInfo
+	ListCronJobs     func() (string, error)
+	ClearHistory     func(req Request) error
+	SetDebug         func(ctx context.Context, channel, chatID, mode string) string
+	ActivateSkill    func(req Request, skillName string) error
+	LockConversation func(ctx context.Context, req Request) string
+	RequestUnlock    func(ctx context.Context, req Request) string
+	VerifyUnlockCode func(ctx context.Context, req Request, code string) string
 }
 
 // Registry stores command definitions indexed by name and alias.
@@ -258,6 +261,8 @@ func BuiltinDefinitions() []Definition {
 		{Name: "start", Description: "Start the bot", Handler: startHandler},
 		{Name: "help", Description: "Show this help message", Handler: helpHandler},
 		{Name: "clear", Description: "Clear conversation history", Handler: clearHandler},
+		{Name: "lock", Description: "Lock this conversation", Handler: lockHandler},
+		{Name: "unlock", Description: "Unlock this conversation", Handler: unlockHandler, Usage: "/unlock [code]"},
 		{Name: "debug", Description: "Toggle debug event forwarding", Handler: debugHandler, Usage: "/debug [on|off]"},
 		{Name: "model", Description: "Show or switch model", Handler: modelHandler},
 		{Name: "show", Description: "Show current configuration"},
@@ -359,6 +364,27 @@ func clearHandler(_ context.Context, req Request, rt *Runtime) error {
 		}
 	}
 	return req.Reply("History cleared.")
+}
+
+func lockHandler(ctx context.Context, req Request, rt *Runtime) error {
+	if rt == nil || rt.LockConversation == nil {
+		return req.Reply("Conversation lock is not available.")
+	}
+	return req.Reply(rt.LockConversation(ctx, req))
+}
+
+func unlockHandler(ctx context.Context, req Request, rt *Runtime) error {
+	if rt == nil || rt.RequestUnlock == nil || rt.VerifyUnlockCode == nil {
+		return req.Reply("Conversation unlock is not available.")
+	}
+	code := nthToken(req.Text, 1)
+	if nthToken(req.Text, 2) != "" {
+		return req.Reply("Usage: /unlock [code]")
+	}
+	if code == "" {
+		return req.Reply(rt.RequestUnlock(ctx, req))
+	}
+	return req.Reply(rt.VerifyUnlockCode(ctx, req, code))
 }
 
 func modelHandler(_ context.Context, req Request, rt *Runtime) error {

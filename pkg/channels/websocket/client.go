@@ -19,7 +19,7 @@ import (
 	"github.com/sushi30/sushiclaw/pkg/logger"
 )
 
-// WebSocketClientChannel connects to a remote Pico Protocol WebSocket server.
+// WebSocketClientChannel connects to a remote WebSocket channel server.
 type WebSocketClientChannel struct {
 	*channels.BaseChannel
 	config *config.WebSocketClientSettings
@@ -29,14 +29,14 @@ type WebSocketClientChannel struct {
 	cancel context.CancelFunc
 }
 
-// NewWebSocketClientChannel creates a new Pico Protocol client channel.
+// NewWebSocketClientChannel creates a new WebSocket client channel.
 func NewWebSocketClientChannel(
 	bc *config.Channel,
 	cfg *config.WebSocketClientSettings,
 	messageBus *bus.MessageBus,
 ) (*WebSocketClientChannel, error) {
 	if cfg.URL == "" {
-		return nil, fmt.Errorf("pico_client url is required")
+		return nil, fmt.Errorf("websocket_client url is required")
 	}
 
 	base := channels.NewBaseChannel("websocket_client", cfg, messageBus, bc.AllowFrom)
@@ -49,12 +49,12 @@ func NewWebSocketClientChannel(
 
 // Start dials the remote server and begins reading.
 func (c *WebSocketClientChannel) Start(ctx context.Context) error {
-	logger.InfoC("websocket_client", "Starting Pico Client channel")
+	logger.InfoC("websocket_client", "Starting WebSocket client channel")
 	c.ctx, c.cancel = context.WithCancel(ctx)
 
 	if err := c.dial(); err != nil {
 		c.cancel()
-		return fmt.Errorf("pico_client initial connect: %w", err)
+		return fmt.Errorf("websocket_client initial connect: %w", err)
 	}
 
 	c.SetRunning(true)
@@ -66,7 +66,7 @@ func (c *WebSocketClientChannel) Start(ctx context.Context) error {
 
 // Stop closes the connection.
 func (c *WebSocketClientChannel) Stop(ctx context.Context) error {
-	logger.InfoC("websocket_client", "Stopping Pico Client channel")
+	logger.InfoC("websocket_client", "Stopping WebSocket client channel")
 	c.SetRunning(false)
 	if c.cancel != nil {
 		c.cancel()
@@ -76,7 +76,7 @@ func (c *WebSocketClientChannel) Stop(ctx context.Context) error {
 		c.conn.close()
 	}
 	c.mu.Unlock()
-	logger.InfoC("websocket_client", "Pico Client channel stopped")
+	logger.InfoC("websocket_client", "WebSocket client channel stopped")
 	return nil
 }
 

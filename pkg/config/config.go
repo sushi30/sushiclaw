@@ -22,14 +22,15 @@ const DefaultMaxMediaSize = 20 * 1024 * 1024
 
 // Config is the top-level sushiclaw configuration.
 type Config struct {
-	Version     int            `json:"version,omitempty"`
-	Agents      AgentsConfig   `json:"agents"`
-	ModelList   []ModelConfig  `json:"model_list"`
-	Channels    ChannelsConfig `json:"channels"`
-	Gateway     GatewayConfig  `json:"gateway"`
-	Tools       ToolsConfig    `json:"tools"`
-	MCP         MCPConfig      `json:"mcp,omitempty"`
-	VoiceConfig VoiceConfig    `json:"voice,omitempty"`
+	Version          int                    `json:"version,omitempty"`
+	Agents           AgentsConfig           `json:"agents"`
+	ModelList        []ModelConfig          `json:"model_list"`
+	Channels         ChannelsConfig         `json:"channels"`
+	Gateway          GatewayConfig          `json:"gateway"`
+	Tools            ToolsConfig            `json:"tools"`
+	ConversationLock ConversationLockConfig `json:"conversation_lock,omitempty"`
+	MCP              MCPConfig              `json:"mcp,omitempty"`
+	VoiceConfig      VoiceConfig            `json:"voice,omitempty"`
 }
 
 // MCPConfig holds MCP server configuration.
@@ -140,6 +141,17 @@ type MediaCleanupCfg struct {
 	Enabled  bool `json:"enabled"`
 	MaxAge   int  `json:"max_age"`
 	Interval int  `json:"interval"`
+}
+
+type ConversationLockConfig struct {
+	Enabled                bool          `json:"enabled"`
+	StandbyAutoLockMinutes int           `json:"standby_auto_lock_minutes,omitempty"`
+	GlobalAutoLockMinutes  int           `json:"global_auto_lock_minutes,omitempty"`
+	OTAExpiryMinutes       int           `json:"ota_expiry_minutes,omitempty"`
+	MaxUnlockAttempts      int           `json:"max_unlock_attempts,omitempty"`
+	ResendAPIKey           *SecureString `json:"resend_api_key,omitzero"`
+	FromEmail              string        `json:"from_email,omitempty"`
+	UnlockEmail            string        `json:"unlock_email,omitempty"`
 }
 
 type WebSearchToolConfig struct {

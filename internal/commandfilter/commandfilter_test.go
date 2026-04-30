@@ -34,7 +34,7 @@ func TestFilter_KnownCommands(t *testing.T) {
 	f := NewCommandFilter()
 	cases := []string{
 		"/start", "/help", "/show", "/list", "/use",
-		"/switch", "/check", "/clear", "/subagents", "/reload",
+		"/switch", "/check", "/clear", "/lock", "/unlock", "/subagents", "/reload",
 	}
 	for _, cmd := range cases {
 		t.Run(cmd, func(t *testing.T) {
@@ -58,6 +58,7 @@ func TestFilter_KnownCommandsWithArgs(t *testing.T) {
 		"/debug on",
 		"/debug off",
 		"/clear",
+		"/unlock 123456",
 	}
 	for _, cmd := range cases {
 		t.Run(cmd, func(t *testing.T) {

@@ -32,6 +32,16 @@
     "model_name": "whisper-1",
     "echo_transcription": false
   },
+  "conversation_lock": {
+    "enabled": false,
+    "standby_auto_lock_minutes": 30,
+    "global_auto_lock_minutes": 480,
+    "ota_expiry_minutes": 10,
+    "max_unlock_attempts": 5,
+    "resend_api_key": "env://RESEND_API_KEY",
+    "from_email": "Sushiclaw <unlock@example.com>",
+    "unlock_email": "example@example.com"
+  },
   "channels": {
     "whatsapp_native": {
       "enabled": false,

@@ -104,6 +104,93 @@ func TestExecuteClearCallsCallback(t *testing.T) {
 	assert.Contains(t, replied, "cleared")
 }
 
+func TestExecuteLockCallsCallback(t *testing.T) {
+	locked := false
+	reg := commands.NewRegistry(commands.BuiltinDefinitions())
+	rt := &commands.Runtime{
+		LockConversation: func(_ context.Context, _ commands.Request) string {
+			locked = true
+			return "Conversation locked."
+		},
+	}
+	exec := commands.NewExecutor(reg, rt)
+
+	var replied string
+	result := exec.Execute(context.Background(), commands.Request{
+		Text:  "/lock",
+		Reply: func(s string) error { replied = s; return nil },
+	})
+	assert.Equal(t, commands.OutcomeHandled, result.Outcome)
+	assert.True(t, locked)
+	assert.Equal(t, "Conversation locked.", replied)
+}
+
+func TestExecuteUnlockRequestsCode(t *testing.T) {
+	requested := false
+	reg := commands.NewRegistry(commands.BuiltinDefinitions())
+	rt := &commands.Runtime{
+		RequestUnlock: func(_ context.Context, _ commands.Request) string {
+			requested = true
+			return "Unlock code sent."
+		},
+		VerifyUnlockCode: func(context.Context, commands.Request, string) string {
+			t.Fatal("VerifyUnlockCode should not be called")
+			return ""
+		},
+	}
+	exec := commands.NewExecutor(reg, rt)
+
+	var replied string
+	result := exec.Execute(context.Background(), commands.Request{
+		Text:  "/unlock",
+		Reply: func(s string) error { replied = s; return nil },
+	})
+	assert.Equal(t, commands.OutcomeHandled, result.Outcome)
+	assert.True(t, requested)
+	assert.Equal(t, "Unlock code sent.", replied)
+}
+
+func TestExecuteUnlockVerifiesCode(t *testing.T) {
+	var gotCode string
+	reg := commands.NewRegistry(commands.BuiltinDefinitions())
+	rt := &commands.Runtime{
+		RequestUnlock: func(context.Context, commands.Request) string {
+			t.Fatal("RequestUnlock should not be called")
+			return ""
+		},
+		VerifyUnlockCode: func(_ context.Context, _ commands.Request, code string) string {
+			gotCode = code
+			return "Conversation unlocked."
+		},
+	}
+	exec := commands.NewExecutor(reg, rt)
+
+	var replied string
+	result := exec.Execute(context.Background(), commands.Request{
+		Text:  "/unlock 123456",
+		Reply: func(s string) error { replied = s; return nil },
+	})
+	assert.Equal(t, commands.OutcomeHandled, result.Outcome)
+	assert.Equal(t, "123456", gotCode)
+	assert.Equal(t, "Conversation unlocked.", replied)
+}
+
+func TestExecuteUnlockInvalidArgs(t *testing.T) {
+	reg := commands.NewRegistry(commands.BuiltinDefinitions())
+	exec := commands.NewExecutor(reg, &commands.Runtime{
+		RequestUnlock:    func(context.Context, commands.Request) string { return "" },
+		VerifyUnlockCode: func(context.Context, commands.Request, string) string { return "" },
+	})
+
+	var replied string
+	result := exec.Execute(context.Background(), commands.Request{
+		Text:  "/unlock 123456 extra",
+		Reply: func(s string) error { replied = s; return nil },
+	})
+	assert.Equal(t, commands.OutcomeHandled, result.Outcome)
+	assert.Equal(t, "Usage: /unlock [code]", replied)
+}
+
 func TestExecuteModel(t *testing.T) {
 	reg := commands.NewRegistry(commands.BuiltinDefinitions())
 	rt := &commands.Runtime{

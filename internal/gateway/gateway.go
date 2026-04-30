@@ -11,6 +11,7 @@ import (
 
 	"github.com/sushi30/sushiclaw/internal/agent"
 	"github.com/sushi30/sushiclaw/internal/commandfilter"
+	"github.com/sushi30/sushiclaw/internal/conversationlock"
 	"github.com/sushi30/sushiclaw/internal/envresolve"
 	"github.com/sushi30/sushiclaw/pkg/audio/asr"
 	"github.com/sushi30/sushiclaw/pkg/bus"
@@ -73,6 +74,12 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 	rt := &commands.Runtime{
 		ListDefinitions: reg.Definitions,
 	}
+
+	lockController, err := conversationlock.NewControllerFromConfig(cfg.ConversationLock, filepath.Join(cfg.WorkspacePath(), ".lock"))
+	if err != nil {
+		return err
+	}
+	lockController.LogEnabled(cfg.ConversationLock)
 
 	mediaStore := media.NewFileMediaStoreWithCleanup(media.MediaCleanerConfig{
 		Enabled:  cfg.Tools.MediaCleanup.Enabled,
@@ -188,6 +195,7 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 	defer cancel()
 
 	rt.SetDebug = dm.Set
+	lockController.Register(rt)
 	if sessionMgr != nil {
 		rt.ClearHistory = func(req commands.Request) error {
 			return sessionMgr.ClearHistory(req.SessionKey)
@@ -215,7 +223,7 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 				dec := cmdFilter.Filter(msg)
 				logger.DebugCF("commandfilter", "Filtered message",
 					map[string]any{
-						"text":    msg.Content,
+						"text":    conversationlock.RedactCommand(msg.Content),
 						"result":  dec.Result,
 						"command": dec.Command,
 					})
@@ -239,6 +247,17 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 					sessionKey = msg.Channel + ":" + msg.ChatID
 				}
 
+				if lockController.IsLocked(sessionKey) && !conversationlock.IsUnlockCommand(msg.Content) {
+					_ = messageBus.PublishOutbound(ctx, bus.OutboundMessage{
+						Channel:    msg.Channel,
+						ChatID:     msg.ChatID,
+						Context:    bus.NewOutboundContext(msg.Channel, msg.ChatID, ""),
+						SessionKey: sessionKey,
+						Content:    lockController.LockedReply(),
+					})
+					continue
+				}
+
 				if commands.HasCommandPrefix(msg.Content) {
 					var reply string
 					result := executor.Execute(ctx, commands.Request{
@@ -251,7 +270,7 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 					})
 					logger.DebugCF("executor", "Command executed",
 						map[string]any{
-							"text":    msg.Content,
+							"text":    conversationlock.RedactCommand(msg.Content),
 							"command": result.Command,
 							"outcome": result.Outcome,
 							"handled": result.Outcome == commands.OutcomeHandled,
@@ -264,6 +283,7 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 								Content: reply,
 							})
 						}
+						lockController.RecordActivity(sessionKey)
 						continue
 					}
 					// OutcomePassthrough: forward to agent.
@@ -271,6 +291,7 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 
 				// Dispatch to agent session directly (avoids bus read race).
 				if sessionMgr != nil {
+					lockController.RecordActivity(sessionKey)
 					go sessionMgr.Dispatch(ctx, msg)
 				}
 			}

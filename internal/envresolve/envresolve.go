@@ -22,6 +22,7 @@ func Config(cfg *config.Config) {
 			resolveSecureString(model.APIKey)
 		}
 	}
+	resolveSecureString(cfg.ConversationLock.ResendAPIKey)
 }
 
 // SecureString resolves a single env://VAR_NAME reference in-place.

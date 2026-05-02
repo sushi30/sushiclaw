@@ -265,7 +265,7 @@ type WhatsAppSettings struct {
 	SessionStorePath string `json:"session_store_path"`
 }
 
-// WebSocketSettings holds Pico Protocol server channel settings.
+// WebSocketSettings holds WebSocket server channel settings.
 type WebSocketSettings struct {
 	Token           SecureString `json:"token,omitzero"`
 	AllowTokenQuery bool         `json:"allow_token_query,omitempty"`
@@ -277,12 +277,12 @@ type WebSocketSettings struct {
 	Port            int          `json:"port,omitempty"`
 }
 
-// SetToken sets the Pico token.
+// SetToken sets the WebSocket token.
 func (c *WebSocketSettings) SetToken(token string) {
 	c.Token = *NewSecureString(token)
 }
 
-// WebSocketClientSettings holds Pico Protocol client channel settings.
+// WebSocketClientSettings holds WebSocket client channel settings.
 type WebSocketClientSettings struct {
 	URL          string       `json:"url"`
 	Token        SecureString `json:"token,omitzero"`
@@ -291,7 +291,7 @@ type WebSocketClientSettings struct {
 	ReadTimeout  int          `json:"read_timeout,omitempty"`
 }
 
-// SetToken sets the Pico client token.
+// SetToken sets the WebSocket client token.
 func (c *WebSocketClientSettings) SetToken(token string) {
 	c.Token = *NewSecureString(token)
 }

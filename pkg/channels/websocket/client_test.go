@@ -37,7 +37,7 @@ func TestNewWebSocketClientChannel_OK(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if ch.Name() != "websocket_client" {
-		t.Fatalf("name = %q, want pico_client", ch.Name())
+		t.Fatalf("name = %q, want websocket_client", ch.Name())
 	}
 }
 

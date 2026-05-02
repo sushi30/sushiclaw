@@ -81,7 +81,7 @@ func (pc *wsConn) close() {
 	}
 }
 
-// WebSocketChannel implements the native Pico Protocol WebSocket channel.
+// WebSocketChannel implements the native WebSocket channel.
 // It serves as the reference implementation for all optional capability interfaces.
 type WebSocketChannel struct {
 	*channels.BaseChannel
@@ -98,14 +98,14 @@ type WebSocketChannel struct {
 	httpServer         *http.Server
 }
 
-// NewWebSocketChannel creates a new Pico Protocol channel.
+// NewWebSocketChannel creates a new WebSocket channel.
 func NewWebSocketChannel(
 	bc *config.Channel,
 	cfg *config.WebSocketSettings,
 	messageBus *bus.MessageBus,
 ) (*WebSocketChannel, error) {
 	if cfg.Token.String() == "" {
-		return nil, fmt.Errorf("pico token is required")
+		return nil, fmt.Errorf("websocket token is required")
 	}
 
 	base := channels.NewBaseChannel("websocket", cfg, messageBus, bc.AllowFrom)
@@ -236,7 +236,7 @@ func (c *WebSocketChannel) currentConnCount() int {
 
 // Start implements Channel.
 func (c *WebSocketChannel) Start(ctx context.Context) error {
-	logger.InfoC("websocket", "Starting Pico Protocol channel")
+	logger.InfoC("websocket", "Starting WebSocket channel")
 	c.ctx, c.cancel = context.WithCancel(ctx)
 	c.SetRunning(true)
 
@@ -256,13 +256,13 @@ func (c *WebSocketChannel) Start(ctx context.Context) error {
 		}
 	}()
 
-	logger.InfoCF("websocket", "Pico Protocol channel started", map[string]any{"addr": addr})
+	logger.InfoCF("websocket", "WebSocket channel started", map[string]any{"addr": addr})
 	return nil
 }
 
 // Stop implements Channel.
 func (c *WebSocketChannel) Stop(ctx context.Context) error {
-	logger.InfoC("websocket", "Stopping Pico Protocol channel")
+	logger.InfoC("websocket", "Stopping WebSocket channel")
 	c.SetRunning(false)
 
 	// Close all connections
@@ -283,16 +283,16 @@ func (c *WebSocketChannel) Stop(ctx context.Context) error {
 		c.progress.StopAll()
 	}
 
-	logger.InfoC("websocket", "Pico Protocol channel stopped")
+	logger.InfoC("websocket", "WebSocket channel stopped")
 	return nil
 }
 
 // WebhookPath implements channels.WebhookHandler.
-func (c *WebSocketChannel) WebhookPath() string { return "/pico/" }
+func (c *WebSocketChannel) WebhookPath() string { return "/websocket/" }
 
 // ServeHTTP implements http.Handler for the shared HTTP server.
 func (c *WebSocketChannel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/pico")
+	path := strings.TrimPrefix(r.URL.Path, "/websocket")
 
 	switch path {
 	case "/ws", "/ws/":
@@ -456,7 +456,7 @@ func (c *WebSocketChannel) StartTyping(ctx context.Context, chatID string) (func
 }
 
 // SendPlaceholder implements channels.PlaceholderCapable.
-// It sends a placeholder message via the Pico Protocol that will later be
+// It sends a placeholder message via the WebSocket protocol that will later be
 // edited to the actual response via EditMessage (channels.MessageEditor).
 func (c *WebSocketChannel) SendPlaceholder(ctx context.Context, chatID string) (string, error) {
 	if !c.bc.Placeholder.Enabled {
@@ -479,7 +479,7 @@ func (c *WebSocketChannel) SendPlaceholder(ctx context.Context, chatID string) (
 	return msgID, nil
 }
 
-// SendMedia implements channels.MediaSender for the Pico web UI.
+// SendMedia implements channels.MediaSender for WebSocket clients.
 // Media is delivered as a normal assistant message carrying structured
 // attachments plus an authenticated same-origin download URL.
 func (c *WebSocketChannel) SendMedia(ctx context.Context, msg bus.OutboundMediaMessage) ([]string, error) {
@@ -524,10 +524,10 @@ func (c *WebSocketChannel) SendMedia(ctx context.Context, msg bus.OutboundMediaM
 
 		attachmentType := strings.TrimSpace(part.Type)
 		if attachmentType == "" {
-			attachmentType = picoInferAttachmentType(filename, contentType)
+			attachmentType = websocketInferAttachmentType(filename, contentType)
 		}
 
-		attachmentURL, err := picoDownloadURLForRef(part.Ref)
+		attachmentURL, err := websocketDownloadURLForRef(part.Ref)
 		if err != nil {
 			logger.ErrorCF("websocket", "Failed to build media download URL", map[string]any{
 				"ref":   part.Ref,
@@ -569,15 +569,15 @@ func (c *WebSocketChannel) SendMedia(ctx context.Context, msg bus.OutboundMediaM
 	return []string{msgID}, nil
 }
 
-func picoDownloadURLForRef(ref string) (string, error) {
-	refID, err := picoMediaRefID(ref)
+func websocketDownloadURLForRef(ref string) (string, error) {
+	refID, err := websocketMediaRefID(ref)
 	if err != nil {
 		return "", err
 	}
-	return "/pico/media/" + url.PathEscape(refID), nil
+	return "/websocket/media/" + url.PathEscape(refID), nil
 }
 
-func picoMediaRefID(ref string) (string, error) {
+func websocketMediaRefID(ref string) (string, error) {
 	refID := strings.TrimSpace(strings.TrimPrefix(ref, "media://"))
 	if refID == "" || strings.Contains(refID, "/") {
 		return "", fmt.Errorf("invalid media ref %q", ref)
@@ -585,7 +585,7 @@ func picoMediaRefID(ref string) (string, error) {
 	return refID, nil
 }
 
-func picoInferAttachmentType(filename, contentType string) string {
+func websocketInferAttachmentType(filename, contentType string) string {
 	contentType = strings.ToLower(strings.TrimSpace(contentType))
 	filename = strings.ToLower(strings.TrimSpace(filename))
 
@@ -610,7 +610,7 @@ func picoInferAttachmentType(filename, contentType string) string {
 	}
 }
 
-func picoAllowsInlineDisplay(filename, contentType string) bool {
+func websocketAllowsInlineDisplay(filename, contentType string) bool {
 	contentType = strings.ToLower(strings.TrimSpace(contentType))
 	filename = strings.ToLower(strings.TrimSpace(filename))
 
@@ -618,7 +618,7 @@ func picoAllowsInlineDisplay(filename, contentType string) bool {
 		return false
 	}
 
-	return picoInferAttachmentType(filename, contentType) == "image"
+	return websocketInferAttachmentType(filename, contentType) == "image"
 }
 
 func (c *WebSocketChannel) handleMediaDownload(w http.ResponseWriter, r *http.Request) {
@@ -631,7 +631,7 @@ func (c *WebSocketChannel) handleMediaDownload(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	refID := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(r.URL.Path, "/pico/media/"), "/"))
+	refID := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(r.URL.Path, "/websocket/media/"), "/"))
 	if refID == "" {
 		http.NotFound(w, r)
 		return
@@ -672,7 +672,7 @@ func (c *WebSocketChannel) handleMediaDownload(w http.ResponseWriter, r *http.Re
 	}
 
 	dispositionType := "attachment"
-	if picoAllowsInlineDisplay(filename, contentType) {
+	if websocketAllowsInlineDisplay(filename, contentType) {
 		dispositionType = "inline"
 	}
 
@@ -898,7 +898,7 @@ func (c *WebSocketChannel) pingLoop(pc *wsConn, interval time.Duration) {
 	}
 }
 
-// handleMessage processes an inbound Pico Protocol message.
+// handleMessage processes an inbound WebSocket message.
 func (c *WebSocketChannel) handleMessage(pc *wsConn, msg WebSocketMessage) {
 	switch msg.Type {
 	case TypePing:
@@ -1085,7 +1085,7 @@ func validateInlineImageDataURL(mediaURL string) error {
 	return nil
 }
 
-// setContextUsagePayload adds context window usage stats to a pico payload.
+// setContextUsagePayload adds context window usage stats to a WebSocket payload.
 func setContextUsagePayload(payload map[string]any, u *bus.ContextUsage) {
 	if u == nil {
 		return

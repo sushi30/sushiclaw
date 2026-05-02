@@ -102,7 +102,7 @@ func TestSend_ThoughtMessageDoesNotFinalizeTrackedToolFeedback(t *testing.T) {
 	}
 	defer func() { _ = ch.Stop(context.Background()) }()
 
-	clientConn, received, cleanup := newTestPicoWebSocket(t)
+	clientConn, received, cleanup := newTestWebSocket(t)
 	defer cleanup()
 	ch.addConnForTest(&wsConn{id: "conn-1", conn: clientConn, sessionID: "sess-1"})
 
@@ -340,7 +340,7 @@ func TestSendMedia_DismissesTrackedToolFeedbackMessage(t *testing.T) {
 	}
 	defer func() { _ = ch.Stop(context.Background()) }()
 
-	clientConn, received, cleanup := newTestPicoWebSocket(t)
+	clientConn, received, cleanup := newTestWebSocket(t)
 	defer cleanup()
 	ch.addConnForTest(&wsConn{id: "conn-1", conn: clientConn, sessionID: "sess-1"})
 
@@ -399,13 +399,13 @@ func TestSendMedia_DismissesTrackedToolFeedbackMessage(t *testing.T) {
 	}
 }
 
-func TestPicoDownloadURLForRef(t *testing.T) {
-	got, err := picoDownloadURLForRef("media://attachment-1")
+func TestWebSocketDownloadURLForRef(t *testing.T) {
+	got, err := websocketDownloadURLForRef("media://attachment-1")
 	if err != nil {
-		t.Fatalf("picoDownloadURLForRef() error = %v", err)
+		t.Fatalf("websocketDownloadURLForRef() error = %v", err)
 	}
-	if got != "/pico/media/attachment-1" {
-		t.Fatalf("picoDownloadURLForRef() = %q, want %q", got, "/pico/media/attachment-1")
+	if got != "/websocket/media/attachment-1" {
+		t.Fatalf("websocketDownloadURLForRef() = %q, want %q", got, "/websocket/media/attachment-1")
 	}
 }
 
@@ -433,7 +433,7 @@ func TestHandleMediaDownload_ServesStoredFile(t *testing.T) {
 	}
 
 	refID := strings.TrimPrefix(ref, "media://")
-	req := httptest.NewRequest("GET", "/pico/media/"+refID, nil)
+	req := httptest.NewRequest("GET", "/websocket/media/"+refID, nil)
 	req.Header.Set("Authorization", "Bearer test-token")
 	rec := httptest.NewRecorder()
 
@@ -471,7 +471,7 @@ func (c *WebSocketChannel) addConnForTest(pc *wsConn) {
 	bySession[pc.id] = pc
 }
 
-func newTestPicoWebSocket(t *testing.T) (*websocket.Conn, <-chan WebSocketMessage, func()) {
+func newTestWebSocket(t *testing.T) (*websocket.Conn, <-chan WebSocketMessage, func()) {
 	t.Helper()
 
 	received := make(chan WebSocketMessage, 4)

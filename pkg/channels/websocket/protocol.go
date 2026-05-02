@@ -25,7 +25,7 @@ const (
 	MessageKindThought = "thought"
 )
 
-// WebSocketMessage is the wire format for all Pico Protocol messages.
+// WebSocketMessage is the wire format for all WebSocket channel messages.
 type WebSocketMessage struct {
 	Type      string         `json:"type"`
 	ID        string         `json:"id,omitempty"`

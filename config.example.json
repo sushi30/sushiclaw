@@ -75,7 +75,7 @@
     "websocket": {
       "enabled": false,
       "type": "websocket",
-      "token": "env://PICO_TOKEN",
+      "token": "env://SUSHICLAW_WEBSOCKET_TOKEN",
       "allow_token_query": false,
       "allow_origins": ["*"],
       "ping_interval": 30,

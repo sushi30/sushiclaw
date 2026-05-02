@@ -429,7 +429,10 @@ func (sm *SessionManager) Chat(ctx context.Context, input string) (string, error
 	if err != nil {
 		return "", err
 	}
-	return s.agent.Run(actx, input)
+	start := time.Now()
+	response, usage, toolCalls, err := s.runDetailedTurn(actx, input)
+	s.logTurnSummary("cli", "cli", time.Since(start), usage, toolCalls, len(response), err)
+	return response, err
 }
 
 // Dispatch processes a single inbound message through the agent.
@@ -521,9 +524,12 @@ func (s *Session) handleInbound(ctx context.Context, msg bus.InboundMessage, ses
 	start := time.Now()
 	s.mgr.emitProgress(ctx, ProgressEvent{Channel: msg.Channel, ChatID: chatID, Kind: ProgressTurnStarted})
 
-	response, err := s.agent.Run(actx, input)
+	response, usage, toolCalls, err := s.runDetailedTurn(actx, input)
+	elapsed := time.Since(start)
+	responseBytes := len(response)
 	if err != nil {
 		logger.ErrorCF("agent", "Agent run failed", map[string]any{"error": err.Error()})
+		s.logTurnSummary(msg.Channel, chatID, elapsed, usage, toolCalls, responseBytes, err)
 		if s.mgr.bus != nil {
 			_ = s.mgr.bus.PublishOutbound(ctx, bus.OutboundMessage{
 				Channel:    msg.Channel,
@@ -532,13 +538,16 @@ func (s *Session) handleInbound(ctx context.Context, msg bus.InboundMessage, ses
 				Content:    fmt.Sprintf("Error: %v", err),
 			})
 		}
-		s.mgr.emitProgress(ctx, ProgressEvent{Channel: msg.Channel, ChatID: chatID, Kind: ProgressFailed, Error: err, Elapsed: time.Since(start)})
+		s.mgr.emitProgress(ctx, ProgressEvent{Channel: msg.Channel, ChatID: chatID, Kind: ProgressFailed, Error: err, Elapsed: elapsed})
 		s.mgr.emitSummary(ctx, ProgressSummary{
-			Channel:  msg.Channel,
-			ChatID:   chatID,
-			Success:  false,
-			Duration: time.Since(start),
-			Error:    err,
+			Channel:       msg.Channel,
+			ChatID:        chatID,
+			Success:       false,
+			ToolCalls:     toolCalls,
+			Usage:         usage,
+			Duration:      elapsed,
+			ResponseBytes: responseBytes,
+			Error:         err,
 		})
 		return
 	}
@@ -553,12 +562,16 @@ func (s *Session) handleInbound(ctx context.Context, msg bus.InboundMessage, ses
 			})
 		}
 	}
-	s.mgr.emitProgress(ctx, ProgressEvent{Channel: msg.Channel, ChatID: chatID, Kind: ProgressCompleted, Elapsed: time.Since(start)})
+	s.logTurnSummary(msg.Channel, chatID, elapsed, usage, toolCalls, responseBytes, nil)
+	s.mgr.emitProgress(ctx, ProgressEvent{Channel: msg.Channel, ChatID: chatID, Kind: ProgressCompleted, Elapsed: elapsed})
 	s.mgr.emitSummary(ctx, ProgressSummary{
-		Channel:  msg.Channel,
-		ChatID:   chatID,
-		Success:  true,
-		Duration: time.Since(start),
+		Channel:       msg.Channel,
+		ChatID:        chatID,
+		Success:       true,
+		ToolCalls:     toolCalls,
+		Usage:         usage,
+		Duration:      elapsed,
+		ResponseBytes: responseBytes,
 	})
 }
 
@@ -699,6 +712,29 @@ func (sm *SessionManager) emitSummary(ctx context.Context, summary ProgressSumma
 	if sm.progress != nil {
 		sm.progress.Summary(ctx, summary)
 	}
+}
+
+func (s *Session) logTurnSummary(channel, chatID string, elapsed time.Duration, usage *interfaces.TokenUsage, toolCalls, responseBytes int, err error) {
+	fields := map[string]any{
+		"channel":        channel,
+		"chat_id":        chatID,
+		"duration":       elapsed.Round(time.Millisecond).String(),
+		"tool_calls":     toolCalls,
+		"response_bytes": responseBytes,
+	}
+	if usage != nil {
+		fields["input_tokens"] = usage.InputTokens
+		fields["output_tokens"] = usage.OutputTokens
+		fields["total_tokens"] = usage.TotalTokens
+	} else {
+		fields["tokens"] = "unavailable"
+	}
+	if err != nil {
+		fields["error"] = err.Error()
+		logger.DebugCF("agent", "Turn summary failed", fields)
+		return
+	}
+	logger.DebugCF("agent", "Turn summary", fields)
 }
 
 func resetTimer(timer *time.Timer, d time.Duration) {

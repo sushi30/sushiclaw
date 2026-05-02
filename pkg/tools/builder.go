@@ -16,16 +16,16 @@ import (
 func NewChatTools(cfg *config.Config) []interfaces.Tool {
 	out := newFileTools(cfg)
 	if cfg.Tools.IsToolEnabled("exec") {
-		out = append(out, exec.NewExecTool(workspacePath(cfg), restrictToWorkspace(cfg), true))
+		out = append(out, withDebugLogging(exec.NewExecTool(workspacePath(cfg), restrictToWorkspace(cfg), true)))
 	}
 	if cfg.Tools.IsToolEnabled("web_search") {
 		if tool, err := websearch.NewTool(cfg.Tools.WebSearch); err == nil {
-			out = append(out, tool)
+			out = append(out, withDebugLogging(tool))
 		}
 	}
 	if cfg.Tools.IsToolEnabled("vision") {
 		if tool, err := vision.NewTool(cfg.Tools.Vision, visionModel(cfg), nil); err == nil {
-			out = append(out, tool)
+			out = append(out, withDebugLogging(tool))
 		}
 	}
 	return out
@@ -39,15 +39,15 @@ func NewGatewayTools(cfg *config.Config, execAllowedSenders []string, store medi
 		if err != nil {
 			return out, err
 		}
-		out = append(out, trustedExec)
+		out = append(out, withDebugLogging(trustedExec))
 	}
 	if cfg.Tools.IsToolEnabled("vision") {
 		if tool, err := vision.NewTool(cfg.Tools.Vision, visionModel(cfg), store); err == nil {
-			out = append(out, tool)
+			out = append(out, withDebugLogging(tool))
 		}
 	}
 	if cfg.Tools.IsToolEnabled("message") && messageBus != nil {
-		out = append(out, message.NewTool(messageBus, cfg.Tools.Message.MinInterval))
+		out = append(out, withDebugLogging(message.NewTool(messageBus, cfg.Tools.Message.MinInterval)))
 	}
 	return out, nil
 }
@@ -58,13 +58,13 @@ func newFileTools(cfg *config.Config) []interfaces.Tool {
 
 	var out []interfaces.Tool
 	if cfg.Tools.IsToolEnabled("read_file") {
-		out = append(out, fstools.NewReadFileTool(workspace, restrict, 0))
+		out = append(out, withDebugLogging(fstools.NewReadFileTool(workspace, restrict, 0)))
 	}
 	if cfg.Tools.IsToolEnabled("write_file") {
-		out = append(out, fstools.NewWriteFileTool(workspace, restrict))
+		out = append(out, withDebugLogging(fstools.NewWriteFileTool(workspace, restrict)))
 	}
 	if cfg.Tools.IsToolEnabled("list_dir") {
-		out = append(out, fstools.NewListDirTool(workspace, restrict))
+		out = append(out, withDebugLogging(fstools.NewListDirTool(workspace, restrict)))
 	}
 	return out
 }

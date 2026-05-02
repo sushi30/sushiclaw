@@ -33,13 +33,17 @@ func (m *InMemoryMemory) GetMessages(_ context.Context, options ...interfaces.Ge
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
+	return filterMessages(m.messages, options...), nil
+}
+
+func filterMessages(messages []interfaces.Message, options ...interfaces.GetMessagesOption) []interfaces.Message {
 	opts := &interfaces.GetMessagesOptions{}
 	for _, o := range options {
 		o(opts)
 	}
 
-	result := make([]interfaces.Message, len(m.messages))
-	copy(result, m.messages)
+	result := make([]interfaces.Message, len(messages))
+	copy(result, messages)
 
 	// Apply role filter
 	if len(opts.Roles) > 0 {
@@ -61,7 +65,7 @@ func (m *InMemoryMemory) GetMessages(_ context.Context, options ...interfaces.Ge
 		result = result[len(result)-opts.Limit:]
 	}
 
-	return result, nil
+	return result
 }
 
 // Clear removes all messages from memory.

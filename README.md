@@ -90,6 +90,9 @@ Copy `config.example.json` to `~/.picoclaw/config.json`. Key sections:
     }
   },
   "model_list": [{ "model_name": "gpt-4o-mini", "api_key": "env://OPENAI_API_KEY" }],
+  "sessions": {
+    "directory": "~/.sushiclaw/sessions"
+  },
   "channels": {
     "email": { "enabled": false, "type": "email", "...": "..." }
   },
@@ -98,6 +101,11 @@ Copy `config.example.json` to `~/.picoclaw/config.json`. Key sections:
 ```
 
 Override config path with `$SUSHICLAW_CONFIG`.
+
+Conversation sessions are persisted in a single SQLite database at
+`<sessions.directory>/sessions.db`. The default session directory is
+`~/.sushiclaw/sessions`, separate from the legacy `~/.picoclaw` config and workspace
+defaults. The `/clear` command removes the current session's persisted history.
 
 ---
 

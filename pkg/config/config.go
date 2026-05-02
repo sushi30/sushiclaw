@@ -30,6 +30,7 @@ type Config struct {
 	Tools       ToolsConfig    `json:"tools"`
 	MCP         MCPConfig      `json:"mcp,omitempty"`
 	VoiceConfig VoiceConfig    `json:"voice,omitempty"`
+	Sessions    SessionsConfig `json:"sessions,omitempty"`
 }
 
 // MCPConfig holds MCP server configuration.
@@ -86,6 +87,10 @@ type GatewayConfig struct {
 	Port                  int    `json:"port"`
 	LogLevel              string `json:"log_level"`
 	DebugHeartbeatSeconds int    `json:"debug_heartbeat_seconds,omitempty"`
+}
+
+type SessionsConfig struct {
+	Directory string `json:"directory,omitempty"`
 }
 
 type ToolsConfig struct {
@@ -368,6 +373,15 @@ func (c *Config) WorkspacePath() string {
 	p := c.Agents.Defaults.Workspace
 	if p == "" {
 		p = GetHome() + "/workspace"
+	}
+	return expandHome(p)
+}
+
+// SessionsPath returns the agent session storage directory with ~ expanded.
+func (c *Config) SessionsPath() string {
+	p := c.Sessions.Directory
+	if p == "" {
+		p = "~/.sushiclaw/sessions"
 	}
 	return expandHome(p)
 }

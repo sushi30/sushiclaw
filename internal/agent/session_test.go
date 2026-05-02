@@ -298,6 +298,7 @@ func TestSessionManager_ActivateSkill(t *testing.T) {
 		},
 	}
 	cfg.Agents.Defaults.Workspace = ws
+	cfg.Sessions.Directory = t.TempDir()
 
 	sm, err := agent.NewSessionManager(cfg, nil, nil, nil)
 	require.NoError(t, err)
@@ -333,6 +334,7 @@ func TestSessionManager_ActivateSkill_AlreadyLoaded(t *testing.T) {
 		},
 	}
 	cfg.Agents.Defaults.Workspace = ws
+	cfg.Sessions.Directory = t.TempDir()
 
 	sm, err := agent.NewSessionManager(cfg, nil, nil, nil)
 	require.NoError(t, err)
@@ -359,6 +361,7 @@ func TestSessionManager_ActivateSkill_NotFound(t *testing.T) {
 		},
 	}
 	cfg.Agents.Defaults.Workspace = ws
+	cfg.Sessions.Directory = t.TempDir()
 
 	sm, err := agent.NewSessionManager(cfg, nil, nil, nil)
 	require.NoError(t, err)

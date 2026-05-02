@@ -24,6 +24,7 @@ func TestRunner_HelpCommand(t *testing.T) {
 		ModelList: []config.ModelConfig{
 			{ModelName: "test-model", Model: "gpt-4", APIKey: config.NewSecureString("test-key")},
 		},
+		Sessions: config.SessionsConfig{Directory: t.TempDir()},
 	}
 
 	// Build agent will fail without a real API key — this test just verifies
@@ -63,6 +64,7 @@ func TestRunner_EmptyInput(t *testing.T) {
 		ModelList: []config.ModelConfig{
 			{ModelName: "test-model", Model: "gpt-4", APIKey: config.NewSecureString("test-key")},
 		},
+		Sessions: config.SessionsConfig{Directory: t.TempDir()},
 	}
 
 	runner, err := chat.NewRunner(cfg)
@@ -84,4 +86,30 @@ func TestRunner_EmptyInput(t *testing.T) {
 
 	// Should show prompts but no responses for empty lines
 	assert.Contains(t, out.String(), "> ")
+}
+
+func TestRunner_ClearCommand(t *testing.T) {
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				ModelName: "test-model",
+				Workspace: "/tmp",
+			},
+		},
+		ModelList: []config.ModelConfig{
+			{ModelName: "test-model", Model: "gpt-4", APIKey: config.NewSecureString("test-key")},
+		},
+		Sessions: config.SessionsConfig{Directory: t.TempDir()},
+	}
+
+	runner, err := chat.NewRunner(cfg)
+	require.NoError(t, err)
+
+	var out bytes.Buffer
+	runner.SetOutput(&out)
+	runner.SetInput(strings.NewReader("/clear\n/quit\n"))
+
+	err = runner.Run(context.Background())
+	require.NoError(t, err)
+	assert.Contains(t, out.String(), "History cleared.")
 }

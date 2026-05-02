@@ -31,6 +31,16 @@ echo "Next release tag: ${version}"
 echo "Current commit:   ${head}"
 echo "origin/main:      ${remote_head}"
 
+if [[ "${FORCE:-}" != "1" && "${head}" != "${remote_head}" ]]; then
+	echo "ERROR: local HEAD (${head}) does not match origin/main (${remote_head})." >&2
+	echo "Run with FORCE=1 to publish anyway." >&2
+	exit 1
+fi
+
+if [[ "${FORCE:-}" == "1" && "${head}" != "${remote_head}" ]]; then
+	echo "WARNING: FORCE=1 set; publishing even though local HEAD differs from origin/main." >&2
+fi
+
 if [[ "${dry_run}" == true ]]; then
 	echo "Dry run: would create annotated tag ${version} and push it to origin."
 	echo "Command: git tag -a ${version} -m \"Release ${version}\""

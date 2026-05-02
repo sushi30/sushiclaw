@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Ingenimax/agent-sdk-go/pkg/interfaces"
+	"github.com/sushi30/sushiclaw/pkg/logger"
 	"github.com/sushi30/sushiclaw/pkg/tools/toolctx"
 )
 
@@ -84,15 +85,34 @@ func (e *ExecTool) Execute(ctx context.Context, args string) (string, error) {
 		cmdStr = restrictCommand(cmdStr, wd)
 	}
 
+	start := time.Now()
+	logger.DebugCF("exec", "Executing command", map[string]any{
+		"chat_id":               ChatIDFromContext(ctx),
+		"working_dir":           wd,
+		"restrict_to_workspace": e.restrictToWorkspace,
+		"allow_remote":          e.allowRemote,
+		"command":               cmdStr,
+	})
+
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "sh", "-c", cmdStr)
 	cmd.Dir = wd
 	out, err := cmd.CombinedOutput()
+	fields := map[string]any{
+		"chat_id":     ChatIDFromContext(ctx),
+		"working_dir": wd,
+		"command":     cmdStr,
+		"duration":    time.Since(start).Round(time.Millisecond).String(),
+		"output_size": len(out),
+	}
 	if err != nil {
+		fields["error"] = err.Error()
+		logger.DebugCF("exec", "Command failed", fields)
 		return string(out), fmt.Errorf("exec error: %w", err)
 	}
+	logger.DebugCF("exec", "Command completed", fields)
 	return string(out), nil
 }
 

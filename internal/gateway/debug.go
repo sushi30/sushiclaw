@@ -184,6 +184,7 @@ func debugSummaryText(summary agent.ProgressSummary) string {
 	}
 	sb.WriteString("\nTask time: ")
 	sb.WriteString(formatDuration(summary.Duration))
+	fmt.Fprintf(&sb, "\nResponse size: %d bytes", summary.ResponseBytes)
 	return sb.String()
 }
 

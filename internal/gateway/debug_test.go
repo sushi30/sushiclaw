@@ -100,18 +100,20 @@ func TestDebugManagerSummaryFormatsUsage(t *testing.T) {
 	mgr.Set(ctx, "telegram", "chat1", "on")
 
 	mgr.Summary(ctx, agent.ProgressSummary{
-		Channel:   "telegram",
-		ChatID:    "chat1",
-		Success:   true,
-		ToolCalls: 2,
-		Usage:     &interfaces.TokenUsage{InputTokens: 3, OutputTokens: 5, TotalTokens: 8},
-		Duration:  1200 * time.Millisecond,
+		Channel:       "telegram",
+		ChatID:        "chat1",
+		Success:       true,
+		ToolCalls:     2,
+		Usage:         &interfaces.TokenUsage{InputTokens: 3, OutputTokens: 5, TotalTokens: 8},
+		Duration:      1200 * time.Millisecond,
+		ResponseBytes: 42,
 	})
 
 	msg := requireOutbound(t, extBus)
 	assert.Contains(t, msg.Content, "Tool calls: 2")
 	assert.Contains(t, msg.Content, "Tokens: total=8 input=3 output=5")
 	assert.True(t, strings.Contains(msg.Content, "Task time: 1s") || strings.Contains(msg.Content, "Task time: 1.2s"))
+	assert.Contains(t, msg.Content, "Response size: 42 bytes")
 }
 
 func requireOutbound(t *testing.T, extBus *bus.MessageBus) bus.OutboundMessage {

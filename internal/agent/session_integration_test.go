@@ -35,6 +35,7 @@ func TestSessionIsolation(t *testing.T) {
 		},
 	}
 	cfg.Agents.Defaults.Workspace = ws
+	cfg.Sessions.Directory = t.TempDir()
 
 	sm, err := NewSessionManager(cfg, bus.NewMessageBus(), nil, nil)
 	require.NoError(t, err)
@@ -90,6 +91,7 @@ func TestClearHistoryEvictsSession(t *testing.T) {
 		},
 	}
 	cfg.Agents.Defaults.Workspace = ws
+	cfg.Sessions.Directory = t.TempDir()
 
 	sm, err := NewSessionManager(cfg, bus.NewMessageBus(), nil, nil)
 	require.NoError(t, err)
@@ -119,8 +121,88 @@ func TestClearHistoryEvictsSession(t *testing.T) {
 	require.Len(t, msgs, 1)
 }
 
+func TestSessionManagerPersistsSessionAcrossManagers(t *testing.T) {
+	ws := t.TempDir()
+	sessionsDir := t.TempDir()
+	skillsDir := filepath.Join(ws, "skills", "python")
+	require.NoError(t, os.MkdirAll(skillsDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(skillsDir, "SKILL.md"), []byte("Persistent skill."), 0644))
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{ModelName: "test-model", Workspace: ws},
+		},
+		ModelList: []config.ModelConfig{
+			{
+				ModelName: "test-model",
+				Model:     "gpt-4o",
+				APIKey:    config.NewSecureString("test-key"),
+			},
+		},
+		Sessions: config.SessionsConfig{Directory: sessionsDir},
+	}
+
+	sm, err := NewSessionManager(cfg, bus.NewMessageBus(), nil, nil)
+	require.NoError(t, err)
+	require.NoError(t, sm.ActivateSkill("telegram:chat1", "python"))
+	sm.Stop()
+
+	reopened, err := NewSessionManager(cfg, bus.NewMessageBus(), nil, nil)
+	require.NoError(t, err)
+	defer reopened.Stop()
+
+	session, err := reopened.getOrCreateSession("telegram:chat1")
+	require.NoError(t, err)
+	msgs, err := session.mem.GetMessages(context.Background())
+	require.NoError(t, err)
+	require.Len(t, msgs, 1)
+	assert.Equal(t, "Persistent skill.", msgs[0].Content)
+}
+
+func TestClearHistoryDeletesPersistedSession(t *testing.T) {
+	ws := t.TempDir()
+	sessionsDir := t.TempDir()
+	skillsDir := filepath.Join(ws, "skills", "python")
+	require.NoError(t, os.MkdirAll(skillsDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(skillsDir, "SKILL.md"), []byte("Clear me."), 0644))
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{ModelName: "test-model", Workspace: ws},
+		},
+		ModelList: []config.ModelConfig{
+			{
+				ModelName: "test-model",
+				Model:     "gpt-4o",
+				APIKey:    config.NewSecureString("test-key"),
+			},
+		},
+		Sessions: config.SessionsConfig{Directory: sessionsDir},
+	}
+
+	sm, err := NewSessionManager(cfg, bus.NewMessageBus(), nil, nil)
+	require.NoError(t, err)
+	require.NoError(t, sm.ActivateSkill("telegram:chat1", "python"))
+	sm.Stop()
+
+	clearer, err := NewSessionManager(cfg, bus.NewMessageBus(), nil, nil)
+	require.NoError(t, err)
+	require.NoError(t, clearer.ClearHistory("telegram:chat1"))
+	clearer.Stop()
+
+	reopened, err := NewSessionManager(cfg, bus.NewMessageBus(), nil, nil)
+	require.NoError(t, err)
+	defer reopened.Stop()
+
+	session, err := reopened.getOrCreateSession("telegram:chat1")
+	require.NoError(t, err)
+	msgs, err := session.mem.GetMessages(context.Background())
+	require.NoError(t, err)
+	assert.Empty(t, msgs)
+}
+
 // TestSessionManagerEviction verifies that stale sessions are evicted by the
-// background cleanup goroutine.
+// background cleanup goroutine without deleting persisted history.
 func TestSessionManagerEviction(t *testing.T) {
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -134,6 +216,7 @@ func TestSessionManagerEviction(t *testing.T) {
 			},
 		},
 	}
+	cfg.Sessions.Directory = t.TempDir()
 
 	sm, err := NewSessionManager(cfg, bus.NewMessageBus(), nil, nil)
 	require.NoError(t, err)
@@ -165,6 +248,13 @@ func TestSessionManagerEviction(t *testing.T) {
 	msgs, err = sm.GetMessages("old-session", context.Background())
 	require.NoError(t, err)
 	assert.Empty(t, msgs)
+
+	session, err := sm.getOrCreateSession("old-session")
+	require.NoError(t, err)
+	msgs, err = session.mem.GetMessages(context.Background())
+	require.NoError(t, err)
+	require.Len(t, msgs, 1)
+	assert.Equal(t, "Skill content.", msgs[0].Content)
 }
 
 // TestDispatchUsesSessionKey verifies that Dispatch routes to the correct
@@ -185,6 +275,7 @@ func TestDispatchUsesSessionKey(t *testing.T) {
 			},
 		},
 	}
+	cfg.Sessions.Directory = t.TempDir()
 
 	sm, err := NewSessionManager(cfg, extBus, nil, nil, WithProgressSink(progress))
 	require.NoError(t, err)

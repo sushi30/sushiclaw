@@ -78,6 +78,20 @@ func TestConfig_WorkspacePath(t *testing.T) {
 	assert.Equal(t, "/tmp/workspace", cfg.WorkspacePath())
 }
 
+func TestConfig_SessionsPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg := &config.Config{}
+	assert.Equal(t, filepath.Join(home, ".sushiclaw", "sessions"), cfg.SessionsPath())
+
+	cfg.Sessions.Directory = "~/custom-sessions"
+	assert.Equal(t, filepath.Join(home, "custom-sessions"), cfg.SessionsPath())
+
+	cfg.Sessions.Directory = "/tmp/sessions"
+	assert.Equal(t, "/tmp/sessions", cfg.SessionsPath())
+}
+
 func TestConfig_Voice(t *testing.T) {
 	cfg := &config.Config{}
 	voice := cfg.Voice()

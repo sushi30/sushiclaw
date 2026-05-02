@@ -45,7 +45,7 @@ type SessionManager struct {
 // Session represents a single isolated conversation context.
 type Session struct {
 	agent           agentRunner
-	mem             *InMemoryMemory
+	mem             interfaces.Memory
 	activatedSkills map[string]bool
 	lastUsed        time.Time
 	mu              sync.RWMutex
@@ -71,7 +71,7 @@ func BuildAgent(cfg *config.Config, tools []interfaces.Tool) (*agentsdk.Agent, e
 	return buildAgentWithMemory(cfg, tools, NewInMemoryMemory())
 }
 
-func buildAgentWithMemory(cfg *config.Config, tools []interfaces.Tool, mem *InMemoryMemory) (*agentsdk.Agent, error) {
+func buildAgentWithMemory(cfg *config.Config, tools []interfaces.Tool, mem interfaces.Memory) (*agentsdk.Agent, error) {
 	maxToolIterations := cfg.Agents.Defaults.MaxToolIterations
 	if maxToolIterations < 0 {
 		return nil, fmt.Errorf("invalid max_tool_iterations %d: must be >= 0", maxToolIterations)
@@ -204,6 +204,10 @@ func (sm *SessionManager) Stop() {
 	sm.mu.Lock()
 	stop := sm.cleanupStop
 	sm.cleanupStop = nil
+	for key, s := range sm.sessions {
+		closeSessionMemory(s.mem)
+		delete(sm.sessions, key)
+	}
 	sm.mu.Unlock()
 	if stop != nil {
 		close(stop)
@@ -232,6 +236,7 @@ func (sm *SessionManager) evictStaleSessions() {
 		lastUsed := s.lastUsed
 		s.mu.RUnlock()
 		if lastUsed.Before(cutoff) {
+			closeSessionMemory(s.mem)
 			delete(sm.sessions, key)
 		}
 	}
@@ -255,9 +260,13 @@ func (sm *SessionManager) getOrCreateSession(key string) (*Session, error) {
 		return s, nil
 	}
 
-	mem := NewInMemoryMemory()
+	mem, err := NewSQLiteSessionMemory(context.Background(), sessionDBPath(sm.cfg), key)
+	if err != nil {
+		return nil, err
+	}
 	a, err := buildAgentWithMemory(sm.cfg, sm.tools, mem)
 	if err != nil {
+		closeSessionMemory(mem)
 		return nil, err
 	}
 
@@ -272,12 +281,34 @@ func (sm *SessionManager) getOrCreateSession(key string) (*Session, error) {
 	return s, nil
 }
 
-// ClearHistory evicts the session from the registry entirely.
+// ClearHistory removes persisted history and evicts the session from the registry.
 func (sm *SessionManager) ClearHistory(sessionKey string) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	delete(sm.sessions, sessionKey)
-	return nil
+	if s, ok := sm.sessions[sessionKey]; ok {
+		if err := s.mem.Clear(context.Background()); err != nil {
+			return err
+		}
+		closeSessionMemory(s.mem)
+		delete(sm.sessions, sessionKey)
+		return nil
+	}
+	mem, err := NewSQLiteSessionMemory(context.Background(), sessionDBPath(sm.cfg), sessionKey)
+	if err != nil {
+		return err
+	}
+	defer closeSessionMemory(mem)
+	return mem.Clear(context.Background())
+}
+
+func sessionDBPath(cfg *config.Config) string {
+	return filepath.Join(cfg.SessionsPath(), "sessions.db")
+}
+
+func closeSessionMemory(mem interfaces.Memory) {
+	if closer, ok := mem.(interface{ Close() error }); ok {
+		_ = closer.Close()
+	}
 }
 
 // SetMediaStore injects a MediaStore for resolving media refs (e.g. voice messages).

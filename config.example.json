@@ -32,6 +32,9 @@
     "model_name": "whisper-1",
     "echo_transcription": false
   },
+  "sessions": {
+    "directory": "~/.sushiclaw/sessions"
+  },
   "channels": {
     "whatsapp_native": {
       "enabled": false,

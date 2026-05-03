@@ -3,6 +3,7 @@ package bus
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -17,6 +18,8 @@ var (
 )
 
 const defaultBusBufferSize = 64
+
+const systemContentPrefix = "[system] "
 
 // StreamDelegate is implemented by the channel Manager to provide streaming
 // capabilities without tight coupling.
@@ -97,6 +100,9 @@ func (mb *MessageBus) PublishOutbound(ctx context.Context, msg OutboundMessage) 
 	msg = NormalizeOutboundMessage(msg)
 	if msg.Context.isZero() {
 		return ErrMissingOutboundContext
+	}
+	if IsSystemOutboundMessage(msg) && !strings.HasPrefix(strings.TrimSpace(msg.Content), systemContentPrefix) {
+		msg.Content = systemContentPrefix + msg.Content
 	}
 	return publish(ctx, mb, mb.outbound, msg)
 }

@@ -295,6 +295,7 @@ func (s *Scheduler) deliverMessage(ctx context.Context, job Job) {
 		Context: bus.NewOutboundContext(job.Channel, job.ChatID, ""),
 		Content: job.Message,
 	}
+	msg = bus.MarkSystemOutboundMessage(msg)
 	if err := s.bus.PublishOutbound(ctx, msg); err != nil {
 		logger.ErrorCF("cron", "Failed to publish outbound cron job", map[string]any{
 			"job":   job.Name,
@@ -332,6 +333,7 @@ func (s *Scheduler) executeCommandJob(ctx context.Context, job Job) {
 		Context: bus.NewOutboundContext(job.Channel, job.ChatID, ""),
 		Content: content,
 	}
+	msg = bus.MarkSystemOutboundMessage(msg)
 	if err := s.bus.PublishOutbound(ctx, msg); err != nil {
 		logger.ErrorCF("cron", "Failed to publish command job output", map[string]any{
 			"job":   job.Name,

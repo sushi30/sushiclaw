@@ -90,6 +90,8 @@ func TestDebugManagerPublishesProgressOnlyToEnabledChat(t *testing.T) {
 	msg := requireOutbound(t, extBus)
 	assert.Equal(t, "telegram", msg.Channel)
 	assert.Equal(t, "chat1", msg.ChatID)
+	assert.Equal(t, bus.MessageKindSystem, msg.Context.Raw["message_kind"])
+	assert.Contains(t, msg.Content, "[system]")
 	assert.Contains(t, msg.Content, "exec")
 }
 
@@ -109,6 +111,8 @@ func TestDebugManagerSummaryFormatsUsage(t *testing.T) {
 	})
 
 	msg := requireOutbound(t, extBus)
+	assert.Equal(t, bus.MessageKindSystem, msg.Context.Raw["message_kind"])
+	assert.Contains(t, msg.Content, "[system]")
 	assert.Contains(t, msg.Content, "Tool calls: 2")
 	assert.Contains(t, msg.Content, "Tokens: total=8 input=3 output=5")
 	assert.True(t, strings.Contains(msg.Content, "Task time: 1s") || strings.Contains(msg.Content, "Task time: 1.2s"))

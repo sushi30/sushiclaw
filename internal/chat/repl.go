@@ -235,11 +235,11 @@ func (r *Runner) startInboundLoop(ctx context.Context) {
 				}
 				dec := cmdFilter.Filter(msg)
 				if dec.Result == commandfilter.Block {
-					_ = r.bus.PublishOutbound(ctx, bus.OutboundMessage{
+					_ = r.bus.PublishOutbound(ctx, bus.MarkSystemOutboundMessage(bus.OutboundMessage{
 						Channel: msg.Channel,
 						ChatID:  msg.ChatID,
 						Content: dec.ErrMsg,
-					})
+					}))
 					continue
 				}
 
@@ -260,11 +260,11 @@ func (r *Runner) startInboundLoop(ctx context.Context) {
 					})
 					if result.Outcome == commands.OutcomeHandled {
 						if reply != "" {
-							_ = r.bus.PublishOutbound(ctx, bus.OutboundMessage{
+							_ = r.bus.PublishOutbound(ctx, bus.MarkSystemOutboundMessage(bus.OutboundMessage{
 								Channel: msg.Channel,
 								ChatID:  msg.ChatID,
 								Content: reply,
-							})
+							}))
 						}
 						continue
 					}

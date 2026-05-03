@@ -49,8 +49,11 @@ func TestMessageTool_Success(t *testing.T) {
 		if msg.ChatID != "chat123" {
 			t.Errorf("expected chatID chat123, got %s", msg.ChatID)
 		}
-		if msg.Content != "Hello update" {
-			t.Errorf("expected content 'Hello update', got %s", msg.Content)
+		if msg.Context.Raw["message_kind"] != bus.MessageKindSystem {
+			t.Errorf("expected system message kind, got %q", msg.Context.Raw["message_kind"])
+		}
+		if msg.Content != "[system] Hello update" {
+			t.Errorf("expected system-prefixed content, got %s", msg.Content)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for outbound message")
@@ -127,7 +130,10 @@ func TestMessageTool_Throttling(t *testing.T) {
 
 	select {
 	case msg := <-b.OutboundChan():
-		if msg.Content != "Third" {
+		if msg.Context.Raw["message_kind"] != bus.MessageKindSystem {
+			t.Errorf("expected system message kind, got %q", msg.Context.Raw["message_kind"])
+		}
+		if msg.Content != "[system] Third" {
 			t.Errorf("expected 'Third', got %s", msg.Content)
 		}
 	case <-time.After(time.Second):

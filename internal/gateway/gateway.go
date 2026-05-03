@@ -226,11 +226,11 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 							"chat_id": msg.ChatID,
 							"command": dec.Command,
 						})
-					_ = messageBus.PublishOutbound(ctx, bus.OutboundMessage{
+					_ = messageBus.PublishOutbound(ctx, bus.MarkSystemOutboundMessage(bus.OutboundMessage{
 						Channel: msg.Channel,
 						ChatID:  msg.ChatID,
 						Content: dec.ErrMsg,
-					})
+					}))
 					continue
 				}
 
@@ -258,11 +258,11 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 						})
 					if result.Outcome == commands.OutcomeHandled {
 						if reply != "" {
-							_ = messageBus.PublishOutbound(ctx, bus.OutboundMessage{
+							_ = messageBus.PublishOutbound(ctx, bus.MarkSystemOutboundMessage(bus.OutboundMessage{
 								Channel: msg.Channel,
 								ChatID:  msg.ChatID,
 								Content: reply,
-							})
+							}))
 						}
 						continue
 					}

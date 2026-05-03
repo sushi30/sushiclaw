@@ -440,11 +440,11 @@ func (sm *SessionManager) Dispatch(ctx context.Context, msg bus.InboundMessage) 
 	if err != nil {
 		logger.ErrorCF("agent", "Failed to create session", map[string]any{"session_key": key, "error": err.Error()})
 		if sm.bus != nil {
-			_ = sm.bus.PublishOutbound(ctx, bus.OutboundMessage{
+			_ = sm.bus.PublishOutbound(ctx, bus.MarkSystemOutboundMessage(bus.OutboundMessage{
 				Channel: msg.Channel,
 				ChatID:  msg.ChatID,
 				Content: fmt.Sprintf("Error: %v", err),
-			})
+			}))
 		}
 		return
 	}
@@ -466,23 +466,23 @@ func (s *Session) handleInbound(ctx context.Context, msg bus.InboundMessage, ses
 	if err != nil {
 		logger.WarnCF("agent", "Transcription failed", map[string]any{"error": err.Error()})
 		if s.mgr.bus != nil {
-			_ = s.mgr.bus.PublishOutbound(ctx, bus.OutboundMessage{
+			_ = s.mgr.bus.PublishOutbound(ctx, bus.MarkSystemOutboundMessage(bus.OutboundMessage{
 				Channel:    msg.Channel,
 				ChatID:     chatID,
 				SessionKey: sessionKey,
 				Content:    "Sorry, I couldn't transcribe that voice message.",
-			})
+			}))
 		}
 		return
 	}
 	if hadAudio && msg.Content == "" {
 		if s.mgr.bus != nil {
-			_ = s.mgr.bus.PublishOutbound(ctx, bus.OutboundMessage{
+			_ = s.mgr.bus.PublishOutbound(ctx, bus.MarkSystemOutboundMessage(bus.OutboundMessage{
 				Channel:    msg.Channel,
 				ChatID:     chatID,
 				SessionKey: sessionKey,
 				Content:    "Sorry, I couldn't understand that voice message.",
-			})
+			}))
 		}
 		return
 	}
@@ -525,12 +525,12 @@ func (s *Session) handleInbound(ctx context.Context, msg bus.InboundMessage, ses
 	if err != nil {
 		logger.ErrorCF("agent", "Agent run failed", map[string]any{"error": err.Error()})
 		if s.mgr.bus != nil {
-			_ = s.mgr.bus.PublishOutbound(ctx, bus.OutboundMessage{
+			_ = s.mgr.bus.PublishOutbound(ctx, bus.MarkSystemOutboundMessage(bus.OutboundMessage{
 				Channel:    msg.Channel,
 				ChatID:     chatID,
 				SessionKey: sessionKey,
 				Content:    fmt.Sprintf("Error: %v", err),
-			})
+			}))
 		}
 		s.mgr.emitProgress(ctx, ProgressEvent{Channel: msg.Channel, ChatID: chatID, Kind: ProgressFailed, Error: err, Elapsed: time.Since(start)})
 		s.mgr.emitSummary(ctx, ProgressSummary{

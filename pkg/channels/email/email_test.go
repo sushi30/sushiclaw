@@ -130,7 +130,7 @@ func TestNewEmailChannel(t *testing.T) {
 
 	t.Run("uses configured channel name and common fields", func(t *testing.T) {
 		bc := testEmailBaseChannel("work_email")
-		bc.AllowFrom = config.FlexibleStringSlice{"allowed@example.com"}
+		bc.AllowFrom = config.FlexibleStringSlice{"email:allowed@example.com"}
 		ch, err := NewEmailChannel(bc, &validCfg, msgBus)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -138,7 +138,7 @@ func TestNewEmailChannel(t *testing.T) {
 		if ch.Name() != "work_email" {
 			t.Errorf("Name() = %q, want %q", ch.Name(), "work_email")
 		}
-		if !ch.IsAllowed("allowed@example.com") {
+		if !ch.IsAllowed("email:allowed@example.com") {
 			t.Error("expected allow_from from common channel config to be used")
 		}
 		if ch.ReasoningChannelID() != "reasoning-email" {
@@ -234,7 +234,7 @@ func TestManagerCreatesEmailChannelFromChannelsConfig(t *testing.T) {
 			"email": {
 				Enabled:   true,
 				Type:      config.ChannelEmail,
-				AllowFrom: config.FlexibleStringSlice{"allowed@example.com"},
+				AllowFrom: config.FlexibleStringSlice{"email:allowed@example.com"},
 			},
 		},
 	}
@@ -248,7 +248,7 @@ func TestManagerCreatesEmailChannelFromChannelsConfig(t *testing.T) {
 		"imap_host": "imap.example.com",
 		"imap_user": "bot@example.com",
 		"imap_password": "password",
-		"allow_from": ["allowed@example.com"]
+		"allow_from": ["email:allowed@example.com"]
 	}`)
 	if err := cfg.Channels["email"].UnmarshalJSON(settingsJSON); err != nil {
 		t.Fatalf("unmarshal email channel: %v", err)

@@ -497,14 +497,19 @@ func (c *WhatsAppNativeChannel) handleIncoming(evt *events.Message) {
 	}
 
 	if !c.IsAllowedSender(sender) {
+		c.LogInboundResolution(chatID, bus.InboundContext{
+			Channel:   "whatsapp",
+			ChatID:    chatID,
+			ChatType:  chatType,
+			SenderID:  senderID,
+			MessageID: messageID,
+		}, "", sender, "blocked", "structured", map[string]any{
+			"reason": "allowlist",
+		})
 		logger.DebugCF(
 			"whatsapp",
 			"WhatsApp message blocked (not in allow_from)",
 			map[string]any{"sender_id": senderID},
-		)
-		_, _ = c.Send(
-			c.runCtx,
-			bus.OutboundMessage{Channel: c.Name(), ChatID: chatID, Content: "You are not authorized to use this bot."},
 		)
 		return
 	}

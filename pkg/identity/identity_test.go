@@ -93,6 +93,21 @@ func TestMatchAllowed_CanonicalID(t *testing.T) {
 	}
 }
 
+func TestMatchAllowed_EmailRequiresCanonicalID(t *testing.T) {
+	sender := bus.SenderInfo{
+		Platform:    "email",
+		PlatformID:  "user@example.com",
+		CanonicalID: "email:user@example.com",
+	}
+
+	if !MatchAllowed(sender, "email:user@example.com") {
+		t.Error("expected canonical email ID match")
+	}
+	if MatchAllowed(sender, "user@example.com") {
+		t.Error("expected plain email allowlist entry not to match")
+	}
+}
+
 func TestIsNumeric(t *testing.T) {
 	tests := []struct {
 		input string

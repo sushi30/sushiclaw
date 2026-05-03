@@ -34,7 +34,7 @@ from the top-level `email_channel` key into the `channels` map.
     "imap_user": "env://SMTP_USER",
     "imap_password": "env://SMTP_PASSWORD",
     "poll_interval_secs": 10,
-    "allow_from": ["you@example.com"]
+    "allow_from": ["email:you@example.com"]
   }
 }
 ```
@@ -58,7 +58,7 @@ from the top-level `email_channel` key into the `channels` map.
       "imap_user": "env://SMTP_USER",
       "imap_password": "env://SMTP_PASSWORD",
       "poll_interval_secs": 10,
-      "allow_from": ["you@example.com"]
+      "allow_from": ["email:you@example.com"]
     }
   }
 }
@@ -81,5 +81,9 @@ from the top-level `email_channel` key into the `channels` map.
 | `imap_user` | string | IMAP username (supports `env://VAR`) |
 | `imap_password` | string | IMAP password (supports `env://VAR`) |
 | `poll_interval_secs` | int | How often to poll for new mail (seconds) |
-| `allow_from` | []string | Allowlist of sender addresses that can message the agent |
+| `allow_from` | []string | Allowlist of canonical sender IDs that can message the agent (for email use `email:user@example.com`) |
+
+### Allowlist Migration Note
+
+Inbound email authorization now matches only structured canonical sender IDs. If your email allowlist still contains plain addresses like `user@example.com`, update them to `email:user@example.com` or inbound mail will be rejected.
 | `reasoning_channel_id` | string | Channel ID for extended reasoning responses |

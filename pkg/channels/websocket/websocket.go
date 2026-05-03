@@ -965,6 +965,15 @@ func (c *WebSocketChannel) handleMessageSend(pc *wsConn, msg WebSocketMessage) {
 	}
 
 	if !c.IsAllowedSender(sender) {
+		c.LogInboundResolution(chatID, bus.InboundContext{
+			Channel:   "websocket",
+			ChatID:    chatID,
+			ChatType:  "direct",
+			SenderID:  senderID,
+			MessageID: msg.ID,
+		}, "", sender, "blocked", "structured", map[string]any{
+			"reason": "allowlist",
+		})
 		return
 	}
 

@@ -1,9 +1,7 @@
 package channels_test
 
 import (
-	"context"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -46,29 +44,6 @@ func TestBaseChannel_IsAllowedSender(t *testing.T) {
 
 	sender2 := bus.SenderInfo{Platform: "telegram", PlatformID: "456"}
 	assert.False(t, ch.IsAllowedSender(sender2))
-}
-
-func TestBaseChannelHandleMessageFallsBackToLegacySenderID(t *testing.T) {
-	ch, mb := newFake(t, []string{"allowed123"})
-
-	ctx := context.Background()
-	ch.HandleMessageWithContextAndSession(ctx, "chat1", "hello", nil, bus.InboundContext{
-		Channel:  "test",
-		ChatID:   "chat1",
-		SenderID: "allowed123",
-	}, "session-1", bus.SenderInfo{
-		Platform:    "telegram",
-		PlatformID:  "different",
-		CanonicalID: "telegram:different",
-	})
-
-	select {
-	case msg := <-mb.InboundChan():
-		assert.Equal(t, "hello", msg.Content)
-		assert.Equal(t, "session-1", msg.SessionKey)
-	case <-time.After(time.Second):
-		t.Fatal("timeout waiting for inbound message")
-	}
 }
 
 func TestBaseChannel_ShouldRespondInGroup(t *testing.T) {

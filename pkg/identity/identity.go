@@ -34,15 +34,21 @@ func MatchAllowed(sender bus.SenderInfo, allowed string) bool {
 		return false
 	}
 
-	if platform, id, ok := ParseCanonicalID(allowed); ok {
-		if !isNumeric(platform) {
-			candidate := BuildCanonicalID(platform, id)
+	platform := strings.ToLower(strings.TrimSpace(sender.Platform))
+
+	if allowedPlatform, id, ok := ParseCanonicalID(allowed); ok {
+		if !isNumeric(allowedPlatform) {
+			candidate := BuildCanonicalID(allowedPlatform, id)
 			if candidate != "" && sender.CanonicalID != "" {
 				return strings.EqualFold(sender.CanonicalID, candidate)
 			}
-			return strings.EqualFold(platform, sender.Platform) &&
+			return strings.EqualFold(allowedPlatform, sender.Platform) &&
 				sender.PlatformID == id
 		}
+	}
+
+	if platform == "email" {
+		return false
 	}
 
 	isAtUsername := strings.HasPrefix(allowed, "@")

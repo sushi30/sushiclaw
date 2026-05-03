@@ -250,7 +250,9 @@ Command execution flow:
 
 Every channel has an `allow_from` array. Empty means **allow everyone** (a warning is logged at
 startup). Use `["*"]` to explicitly allow everyone without the warning. Supports canonical IDs,
-usernames (with or without `@`), and `|` concatenated forms.
+usernames (with or without `@`), and `|` concatenated forms. Structured channels should prefer
+canonical IDs; for email, `allow_from` entries must use `email:user@example.com` rather than a
+plain address.
 
 ### `restrict_to_workspace`
 

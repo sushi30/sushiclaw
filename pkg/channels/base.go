@@ -239,7 +239,7 @@ func (c *BaseChannel) HandleMessageWithContextAndSession(
 	}
 	senderID := strings.TrimSpace(inboundCtx.SenderID)
 	if sender.CanonicalID != "" || sender.PlatformID != "" {
-		if !c.IsAllowedSender(sender) && !c.IsAllowed(senderID) {
+		if !c.IsAllowedSender(sender) {
 			return
 		}
 	} else if !c.IsAllowed(senderID) {

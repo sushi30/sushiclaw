@@ -214,7 +214,7 @@ The legacy top-level `email_channel` key is no longer supported.
       "imap_user": "bot@example.com",
       "imap_password": "env://IMAP_PASSWORD",
       "poll_interval_secs": 30,
-      "allow_from": ["trusted@example.com"],
+      "allow_from": ["email:trusted@example.com"],
       "default_subject": "Re: your message"
     }
   }
@@ -224,6 +224,7 @@ The legacy top-level `email_channel` key is no longer supported.
 - Port 465 → implicit TLS (SMTP). Port 587 → STARTTLS.
 - Port 993 → implicit TLS (IMAP).
 - Processed messages are marked `\Seen`.
+- Email `allow_from` entries must use canonical sender IDs such as `email:trusted@example.com`. Plain addresses like `trusted@example.com` no longer match inbound email senders.
 
 > **Migrating from an older config?** See [RELEASE_NOTES.md](RELEASE_NOTES.md) for step-by-step instructions if your config uses the old top-level `email_channel` format.
 

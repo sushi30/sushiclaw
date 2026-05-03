@@ -249,7 +249,8 @@ func TestSessionManagerTurnSummaryLogsUsageAndDuration(t *testing.T) {
 		mgr: sm,
 	}
 
-	session.handleInbound(t.Context(), inbound("telegram", "chat1", "hi"), "telegram:chat1")
+	turnCtx, turnSeq, turnDone := session.startTurn(t.Context())
+	session.handleInbound(turnCtx, inbound("telegram", "chat1", "hi"), "telegram:chat1", turnSeq, turnDone)
 
 	data, err := os.ReadFile(logFile)
 	require.NoError(t, err)

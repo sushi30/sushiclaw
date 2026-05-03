@@ -95,6 +95,7 @@ func (t *Tool) Execute(ctx context.Context, args string) (string, error) {
 		Context: bus.NewOutboundContext(channel, chatID, ""),
 		Content: req.Content,
 	}
+	msg = bus.MarkSystemOutboundMessage(msg)
 
 	if err := t.bus.PublishOutbound(ctx, msg); err != nil {
 		return "", fmt.Errorf("message_tool: failed to send message: %w", err)

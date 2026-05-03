@@ -209,7 +209,8 @@ func TestSessionManagerRunErrorPublishesOneUserErrorAndFailureSummary(t *testing
 	session.handleInbound(t.Context(), inbound("telegram", "chat1", "bad"), "telegram:chat1")
 
 	msg := requireOutboundMessage(t, extBus)
-	assert.Equal(t, "Error: run failed", msg.Content)
+	assert.Equal(t, bus.MessageKindSystem, msg.Context.Raw["message_kind"])
+	assert.Equal(t, "[system] Error: run failed", msg.Content)
 	assertNoOutboundMessage(t, extBus)
 	require.Len(t, progress.summaries, 1)
 	assert.False(t, progress.summaries[0].Success)

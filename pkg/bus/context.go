@@ -2,6 +2,11 @@ package bus
 
 import "strings"
 
+const (
+	// MessageKindSystem marks outbound messages that did not come from the LLM.
+	MessageKindSystem = "system"
+)
+
 func (ctx InboundContext) isZero() bool {
 	return ctx.Channel == "" &&
 		ctx.Account == "" &&
@@ -84,6 +89,35 @@ func NormalizeOutboundMessage(msg OutboundMessage) OutboundMessage {
 	}
 	msg.Scope = cloneOutboundScope(msg.Scope)
 	return msg
+}
+
+// MarkSystemOutboundMessage annotates an outbound message as non-LLM/system-generated.
+// The visible "[system]" prefix is applied when the message is published to the bus.
+func MarkSystemOutboundMessage(msg OutboundMessage) OutboundMessage {
+	msg = NormalizeOutboundMessage(msg)
+	if msg.Context.Raw == nil {
+		msg.Context.Raw = make(map[string]string, 1)
+	}
+	msg.Context.Raw["message_kind"] = MessageKindSystem
+	return msg
+}
+
+// NewSystemOutboundMessage builds a minimal system-tagged outbound message.
+func NewSystemOutboundMessage(channel, chatID, content string) OutboundMessage {
+	return MarkSystemOutboundMessage(OutboundMessage{
+		Channel: channel,
+		ChatID:  chatID,
+		Context: NewOutboundContext(channel, chatID, ""),
+		Content: content,
+	})
+}
+
+// IsSystemOutboundMessage reports whether an outbound message is marked as system-generated.
+func IsSystemOutboundMessage(msg OutboundMessage) bool {
+	if len(msg.Context.Raw) == 0 {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(msg.Context.Raw["message_kind"]), MessageKindSystem)
 }
 
 // NormalizeOutboundMediaMessage normalizes media outbound messages.

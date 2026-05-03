@@ -115,11 +115,11 @@ func (d *DebugManager) publish(ctx context.Context, channel, chatID, content str
 	if d.bus == nil || strings.TrimSpace(content) == "" {
 		return
 	}
-	if err := d.bus.PublishOutbound(ctx, bus.OutboundMessage{
+	if err := d.bus.PublishOutbound(ctx, bus.MarkSystemOutboundMessage(bus.OutboundMessage{
 		Channel: channel,
 		ChatID:  chatID,
 		Content: content,
-	}); err != nil {
+	})); err != nil {
 		logger.WarnCF("debug", "Failed to publish debug message", map[string]any{
 			"channel": channel,
 			"chat_id": chatID,

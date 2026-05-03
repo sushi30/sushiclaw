@@ -59,6 +59,31 @@ func TestPublishReceiveOutbound(t *testing.T) {
 	}
 }
 
+func TestPublishReceiveOutboundSystem(t *testing.T) {
+	mb := bus.NewMessageBus()
+	defer mb.Close()
+
+	ctx := context.Background()
+	msg := bus.MarkSystemOutboundMessage(bus.OutboundMessage{
+		Channel: "telegram",
+		ChatID:  "123",
+		Content: "reply",
+		Context: bus.NewOutboundContext("telegram", "123", ""),
+	})
+
+	err := mb.PublishOutbound(ctx, msg)
+	require.NoError(t, err)
+
+	select {
+	case got := <-mb.OutboundChan():
+		assert.Equal(t, "telegram", got.Channel)
+		assert.Equal(t, "[system] reply", got.Content)
+		assert.Equal(t, bus.MessageKindSystem, got.Context.Raw["message_kind"])
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for system outbound message")
+	}
+}
+
 func TestCloseDropsPublish(t *testing.T) {
 	mb := bus.NewMessageBus()
 	mb.Close()

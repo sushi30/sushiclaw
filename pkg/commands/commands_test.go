@@ -58,6 +58,7 @@ func TestExecuteHelp(t *testing.T) {
 	assert.Equal(t, commands.OutcomeHandled, result.Outcome)
 	assert.Contains(t, replied, "/help")
 	assert.Contains(t, replied, "/clear")
+	assert.Contains(t, replied, "/stop")
 }
 
 func TestExecuteHelpNoRuntime(t *testing.T) {
@@ -102,6 +103,46 @@ func TestExecuteClearCallsCallback(t *testing.T) {
 	assert.Equal(t, commands.OutcomeHandled, result.Outcome)
 	assert.True(t, cleared)
 	assert.Contains(t, replied, "cleared")
+}
+
+func TestExecuteStopActiveTurn(t *testing.T) {
+	reg := commands.NewRegistry(commands.BuiltinDefinitions())
+	stopped := false
+	rt := &commands.Runtime{
+		StopTurn: func(sessionKey string) bool {
+			stopped = true
+			return sessionKey == "telegram:123"
+		},
+	}
+	exec := commands.NewExecutor(reg, rt)
+
+	var replied string
+	result := exec.Execute(context.Background(), commands.Request{
+		Text:       "/stop",
+		SessionKey: "telegram:123",
+		Reply:      func(s string) error { replied = s; return nil },
+	})
+
+	assert.Equal(t, commands.OutcomeHandled, result.Outcome)
+	assert.True(t, stopped)
+	assert.Equal(t, "Stopped current turn.", replied)
+}
+
+func TestExecuteStopIdleSession(t *testing.T) {
+	reg := commands.NewRegistry(commands.BuiltinDefinitions())
+	exec := commands.NewExecutor(reg, &commands.Runtime{
+		StopTurn: func(string) bool { return false },
+	})
+
+	var replied string
+	result := exec.Execute(context.Background(), commands.Request{
+		Text:       "/stop",
+		SessionKey: "telegram:123",
+		Reply:      func(s string) error { replied = s; return nil },
+	})
+
+	assert.Equal(t, commands.OutcomeHandled, result.Outcome)
+	assert.Equal(t, "No active turn.", replied)
 }
 
 func TestExecuteModel(t *testing.T) {

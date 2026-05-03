@@ -192,6 +192,7 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 		rt.ClearHistory = func(req commands.Request) error {
 			return sessionMgr.ClearHistory(req.SessionKey)
 		}
+		rt.StopTurn = sessionMgr.StopTurn
 		rt.GetModelInfo = sessionMgr.GetModelInfo
 		rt.ListModels = sessionMgr.ListModels
 		rt.ListSkills = sessionMgr.ListSkills

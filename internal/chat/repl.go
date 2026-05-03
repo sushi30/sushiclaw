@@ -218,6 +218,7 @@ func (r *Runner) startInboundLoop(ctx context.Context) {
 		ClearHistory: func(req commands.Request) error {
 			return r.session.ClearHistory(req.SessionKey)
 		},
+		StopTurn: r.session.StopTurn,
 		ActivateSkill: func(req commands.Request, skillName string) error {
 			return r.session.ActivateSkill(req.SessionKey, skillName)
 		},

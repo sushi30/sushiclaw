@@ -366,11 +366,12 @@ func TestOutboundMessageIncludesSessionKey(t *testing.T) {
 	sm := &SessionManager{bus: extBus, progress: progress}
 	session := &Session{agent: &mockRunner{runResult: "hi"}, mgr: sm}
 
-	session.handleInbound(context.Background(), bus.InboundMessage{
+	turnCtx, turnSeq, turnDone := session.startTurn(context.Background())
+	session.handleInbound(turnCtx, bus.InboundMessage{
 		Channel: "telegram",
 		ChatID:  "chat1",
 		Content: "hello",
-	}, "telegram:chat1")
+	}, "telegram:chat1", turnSeq, turnDone)
 
 	msg := requireOutboundMessage(t, extBus)
 	assert.Equal(t, "hi", msg.Content)

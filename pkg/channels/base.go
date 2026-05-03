@@ -191,6 +191,62 @@ func (c *BaseChannel) IsAllowedSender(sender bus.SenderInfo) bool {
 	return false
 }
 
+// LogInboundResolution emits a structured audit log for a single inbound access attempt.
+func (c *BaseChannel) LogInboundResolution(
+	deliveryChatID string,
+	inboundCtx bus.InboundContext,
+	sessionKey string,
+	sender bus.SenderInfo,
+	resolution string,
+	authPath string,
+	extra map[string]any,
+) {
+	chatID := inboundCtx.ChatID
+	if chatID == "" {
+		chatID = deliveryChatID
+	}
+
+	senderID := strings.TrimSpace(inboundCtx.SenderID)
+	if sender.CanonicalID != "" {
+		senderID = sender.CanonicalID
+	} else if senderID == "" {
+		senderID = strings.TrimSpace(sender.PlatformID)
+	}
+
+	fields := map[string]any{
+		"channel":     c.name,
+		"chat_id":     chatID,
+		"chat_type":   inboundCtx.ChatType,
+		"message_id":  inboundCtx.MessageID,
+		"sender_id":   senderID,
+		"resolution":  resolution,
+		"session_key": sessionKey,
+	}
+	if authPath != "" {
+		fields["auth_path"] = authPath
+	}
+	if sender.Platform != "" {
+		fields["platform"] = sender.Platform
+	}
+	if sender.PlatformID != "" {
+		fields["platform_id"] = sender.PlatformID
+	}
+	if sender.CanonicalID != "" {
+		fields["canonical_id"] = sender.CanonicalID
+	}
+	if sender.Username != "" {
+		fields["username"] = sender.Username
+	}
+	if sender.DisplayName != "" {
+		fields["display_name"] = sender.DisplayName
+	}
+	for k, v := range extra {
+		fields[k] = v
+	}
+
+	logger.InfoCF("channels", "Inbound access resolution", fields)
+}
+
 // ShouldRespondInGroup determines whether the bot should respond in a group chat.
 func (c *BaseChannel) ShouldRespondInGroup(isMentioned bool, content string) (bool, string) {
 	gt := c.groupTrigger
@@ -238,11 +294,19 @@ func (c *BaseChannel) HandleMessageWithContextAndSession(
 		sender = senderOpts[0]
 	}
 	senderID := strings.TrimSpace(inboundCtx.SenderID)
+	authPath := "legacy"
 	if sender.CanonicalID != "" || sender.PlatformID != "" {
+		authPath = "structured"
 		if !c.IsAllowedSender(sender) {
+			c.LogInboundResolution(deliveryChatID, inboundCtx, sessionKey, sender, "blocked", authPath, map[string]any{
+				"reason": "allowlist",
+			})
 			return
 		}
 	} else if !c.IsAllowed(senderID) {
+		c.LogInboundResolution(deliveryChatID, inboundCtx, sessionKey, sender, "blocked", authPath, map[string]any{
+			"reason": "allowlist",
+		})
 		return
 	}
 
@@ -300,7 +364,15 @@ func (c *BaseChannel) HandleMessageWithContextAndSession(
 			"chat_id": deliveryChatID,
 			"error":   err.Error(),
 		})
+		c.LogInboundResolution(deliveryChatID, inboundCtx, sessionKey, sender, "error", authPath, map[string]any{
+			"error":  err.Error(),
+			"reason": "publish_inbound",
+		})
+		return
 	}
+	c.LogInboundResolution(deliveryChatID, inboundCtx, sessionKey, sender, "success", authPath, map[string]any{
+		"media_count": len(mediaFiles),
+	})
 }
 
 // HandleInboundContext publishes a normalized inbound message using the structured context.

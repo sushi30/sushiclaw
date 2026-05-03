@@ -607,11 +607,17 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 
 	// check allowlist to avoid downloading attachments for rejected users
 	if !c.IsAllowedSender(sender) {
+		c.LogInboundResolution(chatIDStr, bus.InboundContext{
+			Channel:   "telegram",
+			ChatID:    chatIDStr,
+			ChatType:  "direct",
+			SenderID:  platformID,
+			MessageID: fmt.Sprintf("%d", message.MessageID),
+		}, "", sender, "blocked", "structured", map[string]any{
+			"reason": "allowlist",
+		})
 		logger.DebugCF("telegram", "Message rejected by allowlist", map[string]any{
 			"user_id": platformID,
-		})
-		_, _ = c.Send(ctx, bus.OutboundMessage{
-			Channel: "telegram", ChatID: chatIDStr, Content: "You are not authorized to use this bot.",
 		})
 		return nil
 	}

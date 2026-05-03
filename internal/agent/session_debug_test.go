@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -12,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/sushi30/sushiclaw/pkg/bus"
+	"github.com/sushi30/sushiclaw/pkg/logger"
 )
 
 type mockRunner struct {
@@ -38,6 +41,18 @@ func (m *mockRunner) RunStream(context.Context, string) (<-chan interfaces.Agent
 }
 
 func (m *mockRunner) RunDetailed(context.Context, string) (*interfaces.AgentResponse, error) {
+	if m.detailedErr != nil {
+		return nil, m.detailedErr
+	}
+	if m.detailed != nil {
+		return m.detailed, nil
+	}
+	if m.runErr != nil {
+		return nil, m.runErr
+	}
+	if m.runResult != "" {
+		return &interfaces.AgentResponse{Content: m.runResult}, nil
+	}
 	return m.detailed, m.detailedErr
 }
 
@@ -71,7 +86,19 @@ func TestSessionManagerDebugStartCompletionAndSummary(t *testing.T) {
 	extBus := bus.NewMessageBus()
 	progress := &collectingProgress{}
 	sm := &SessionManager{bus: extBus, progress: progress}
-	session := &Session{agent: &mockRunner{runResult: "hello"}, mgr: sm}
+	session := &Session{
+		agent: &mockRunner{
+			detailed: &interfaces.AgentResponse{
+				Content: "hello",
+				Usage:   &interfaces.TokenUsage{InputTokens: 7, OutputTokens: 8, TotalTokens: 15},
+				ExecutionSummary: interfaces.ExecutionSummary{
+					LLMCalls:  1,
+					ToolCalls: 2,
+				},
+			},
+		},
+		mgr: sm,
+	}
 
 	session.handleInbound(t.Context(), inbound("telegram", "chat1", "hi"), "telegram:chat1")
 
@@ -80,6 +107,10 @@ func TestSessionManagerDebugStartCompletionAndSummary(t *testing.T) {
 	assertEventKinds(t, progress.events, ProgressTurnStarted, ProgressCompleted)
 	require.Len(t, progress.summaries, 1)
 	assert.True(t, progress.summaries[0].Success)
+	assert.Equal(t, 2, progress.summaries[0].ToolCalls)
+	require.NotNil(t, progress.summaries[0].Usage)
+	assert.Equal(t, 15, progress.summaries[0].Usage.TotalTokens)
+	assert.Equal(t, len("hello"), progress.summaries[0].ResponseBytes)
 	assert.GreaterOrEqual(t, progress.summaries[0].Duration, time.Duration(0))
 }
 
@@ -173,7 +204,7 @@ func TestSessionManagerRunErrorPublishesOneUserErrorAndFailureSummary(t *testing
 	extBus := bus.NewMessageBus()
 	progress := &collectingProgress{}
 	sm := &SessionManager{bus: extBus, progress: progress}
-	session := &Session{agent: &mockRunner{runErr: runErr}, mgr: sm}
+	session := &Session{agent: &mockRunner{detailedErr: runErr}, mgr: sm}
 
 	session.handleInbound(t.Context(), inbound("telegram", "chat1", "bad"), "telegram:chat1")
 
@@ -183,7 +214,49 @@ func TestSessionManagerRunErrorPublishesOneUserErrorAndFailureSummary(t *testing
 	require.Len(t, progress.summaries, 1)
 	assert.False(t, progress.summaries[0].Success)
 	assert.ErrorIs(t, progress.summaries[0].Error, runErr)
+	assert.Equal(t, 0, progress.summaries[0].ResponseBytes)
 	assertHasEvent(t, progress.events, ProgressFailed)
+}
+
+func TestSessionManagerTurnSummaryLogsUsageAndDuration(t *testing.T) {
+	tmpDir := t.TempDir()
+	logFile := filepath.Join(tmpDir, "debug.log")
+
+	prevLevel := logger.GetLevel()
+	logger.SetLevel(logger.DEBUG)
+	require.NoError(t, logger.EnableFileLogging(logFile))
+	t.Cleanup(func() {
+		logger.DisableFileLogging()
+		logger.SetLevel(prevLevel)
+	})
+
+	extBus := bus.NewMessageBus()
+	progress := &collectingProgress{}
+	sm := &SessionManager{bus: extBus, progress: progress}
+	session := &Session{
+		agent: &mockRunner{
+			detailed: &interfaces.AgentResponse{
+				Content: "hello",
+				Usage:   &interfaces.TokenUsage{InputTokens: 1, OutputTokens: 2, TotalTokens: 3},
+				ExecutionSummary: interfaces.ExecutionSummary{
+					LLMCalls:  1,
+					ToolCalls: 1,
+				},
+			},
+		},
+		mgr: sm,
+	}
+
+	session.handleInbound(t.Context(), inbound("telegram", "chat1", "hi"), "telegram:chat1")
+
+	data, err := os.ReadFile(logFile)
+	require.NoError(t, err)
+	logs := string(data)
+	assert.Contains(t, logs, "Turn summary")
+	assert.Contains(t, logs, "total_tokens")
+	assert.Contains(t, logs, "duration")
+	assert.Contains(t, logs, "tool_calls")
+	assert.Contains(t, logs, "response_bytes")
 }
 
 func TestSessionManagerStreamingStartupFallbackUsesDetailedUsage(t *testing.T) {

@@ -10,6 +10,7 @@ import (
 	"github.com/sushi30/sushiclaw/pkg/bus"
 	"github.com/sushi30/sushiclaw/pkg/config"
 	"github.com/sushi30/sushiclaw/pkg/logger"
+	"github.com/sushi30/sushiclaw/pkg/tools"
 	"github.com/sushi30/sushiclaw/pkg/tools/exec"
 )
 
@@ -318,7 +319,7 @@ func (s *Scheduler) executeCommandJob(ctx context.Context, job Job) {
 	execCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	execTool := exec.NewExecTool(s.cfg.WorkspacePath(), s.cfg.Agents.Defaults.RestrictToWorkspace, true)
+	execTool := tools.WithDebugLogging(exec.NewExecTool(s.cfg.WorkspacePath(), s.cfg.Agents.Defaults.RestrictToWorkspace, true))
 	output, err := execTool.Run(execCtx, job.Command)
 
 	content := output

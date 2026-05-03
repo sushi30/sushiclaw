@@ -2,8 +2,12 @@ package exec
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sushi30/sushiclaw/pkg/logger"
 )
 
 func TestWithChatID(t *testing.T) {
@@ -159,6 +163,44 @@ func TestExecTool_Run(t *testing.T) {
 	}
 	if !strings.Contains(out, "run-test") {
 		t.Errorf("output = %q, want to contain 'run-test'", out)
+	}
+}
+
+func TestExecTool_LogsExecutedCommand(t *testing.T) {
+	tmpDir := t.TempDir()
+	logFile := filepath.Join(tmpDir, "debug.log")
+
+	prevLevel := logger.GetLevel()
+	logger.SetLevel(logger.DEBUG)
+	if err := logger.EnableFileLogging(logFile); err != nil {
+		t.Fatalf("EnableFileLogging: %v", err)
+	}
+	t.Cleanup(func() {
+		logger.DisableFileLogging()
+		logger.SetLevel(prevLevel)
+	})
+
+	tool := NewExecTool("", false, true)
+	ctx := WithChatID(context.Background(), "cli")
+
+	_, err := tool.Execute(ctx, `{"command":"echo log-me"}`)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	data, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("read log file: %v", err)
+	}
+	logs := string(data)
+	if !strings.Contains(logs, "Executing command") {
+		t.Fatalf("logs = %q, want to contain executing command entry", logs)
+	}
+	if !strings.Contains(logs, "log-me") {
+		t.Fatalf("logs = %q, want to contain the command", logs)
+	}
+	if !strings.Contains(logs, "duration") {
+		t.Fatalf("logs = %q, want to contain duration", logs)
 	}
 }
 

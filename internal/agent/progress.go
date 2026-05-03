@@ -37,10 +37,11 @@ type ProgressSummary struct {
 	ChatID  string
 	Success bool
 
-	ToolCalls int
-	Usage     *interfaces.TokenUsage
-	Duration  time.Duration
-	Error     error
+	ToolCalls     int
+	Usage         *interfaces.TokenUsage
+	Duration      time.Duration
+	ResponseBytes int
+	Error         error
 }
 
 type ProgressSink interface {

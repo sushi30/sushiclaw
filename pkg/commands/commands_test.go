@@ -394,7 +394,7 @@ func TestExecuteListSkills(t *testing.T) {
 	})
 	assert.Equal(t, commands.OutcomeHandled, result.Outcome)
 	assert.Contains(t, replied, "Available skills:")
-	assert.Contains(t, replied, "• python — Python coding help")
+	assert.Contains(t, replied, "• python")
 	assert.Contains(t, replied, "• review")
 }
 

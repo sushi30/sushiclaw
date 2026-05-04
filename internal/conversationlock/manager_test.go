@@ -156,7 +156,7 @@ func TestManagerDisabledFeature(t *testing.T) {
 }
 
 func TestManagerPersistsSupportLockout(t *testing.T) {
-	now := time.Date(2026, 4, 30, 12, 0, 0, 0, time.UTC)
+	now := time.Now().UTC()
 	path := t.TempDir() + "/.lock"
 	sender := &fakeSender{}
 	m := NewManager(Options{

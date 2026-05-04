@@ -33,6 +33,8 @@ type SessionManager struct {
 	bus             *bus.MessageBus
 	tools           []interfaces.Tool
 	progress        ProgressSink
+	agentFactory    func(mem interfaces.Memory) (agentRunner, error)
+	summaryFactory  func() (agentRunner, error)
 	mediaStore      media.MediaStore
 	transcriber     asr.Transcriber
 	sessions        map[string]*Session
@@ -50,6 +52,8 @@ type Session struct {
 	activeTurnCancel context.CancelFunc
 	activeTurnDone   chan struct{}
 	activeTurnSeq    uint64
+	stableKey        string
+	backingKey       string
 	lastUsed         time.Time
 	mu               sync.RWMutex
 	mgr              *SessionManager
@@ -143,6 +147,10 @@ func buildAgentWithMemory(cfg *config.Config, tools []interfaces.Tool, mem inter
 	return a, nil
 }
 
+func buildSummaryAgent(cfg *config.Config) (agentRunner, error) {
+	return buildAgentWithMemory(cfg, nil, NewInMemoryMemory())
+}
+
 // toAgentSDKMCPConfig converts sushiclaw MCPConfig to agent-sdk-go MCPConfiguration.
 func toAgentSDKMCPConfig(cfg config.MCPConfig) *agentsdk.MCPConfiguration {
 	if len(cfg.MCPServers) == 0 {
@@ -179,6 +187,8 @@ func NewSessionManager(cfg *config.Config, messageBus *bus.MessageBus, tools []i
 		cfg:             cfg,
 		bus:             messageBus,
 		tools:           tools,
+		agentFactory:    func(mem interfaces.Memory) (agentRunner, error) { return buildAgentWithMemory(cfg, tools, mem) },
+		summaryFactory:  func() (agentRunner, error) { return buildSummaryAgent(cfg) },
 		mediaStore:      store,
 		sessions:        make(map[string]*Session),
 		ttl:             30 * 24 * time.Hour,
@@ -269,7 +279,23 @@ func (sm *SessionManager) getOrCreateSession(key string) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	a, err := buildAgentWithMemory(sm.cfg, sm.tools, mem)
+	activeKey, err := resolveActiveSessionKey(context.Background(), mem.db, key)
+	if err != nil {
+		closeSessionMemory(mem)
+		return nil, err
+	}
+	if activeKey != key {
+		closeSessionMemory(mem)
+		mem, err = NewSQLiteSessionMemory(context.Background(), sessionDBPath(sm.cfg), activeKey)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if err := ensureSessionLineage(context.Background(), mem.db, key, activeKey); err != nil {
+		closeSessionMemory(mem)
+		return nil, err
+	}
+	a, err := sm.buildSessionAgent(mem)
 	if err != nil {
 		closeSessionMemory(mem)
 		return nil, err
@@ -279,6 +305,8 @@ func (sm *SessionManager) getOrCreateSession(key string) (*Session, error) {
 		agent:           a,
 		mem:             mem,
 		activatedSkills: make(map[string]bool),
+		stableKey:       key,
+		backingKey:      activeKey,
 		lastUsed:        time.Now(),
 		mgr:             sm,
 	}
@@ -292,7 +320,24 @@ func (sm *SessionManager) ClearHistory(sessionKey string) error {
 	defer sm.mu.Unlock()
 	if s, ok := sm.sessions[sessionKey]; ok {
 		s.stopTurn()
-		if err := s.mem.Clear(context.Background()); err != nil {
+		mem, ok := s.mem.(*SQLiteSessionMemory)
+		if !ok {
+			if err := s.mem.Clear(context.Background()); err != nil {
+				return err
+			}
+			delete(sm.sessions, sessionKey)
+			return nil
+		}
+		lineageKeys, err := listSessionLineageKeys(context.Background(), mem.db, sessionKey)
+		if err != nil {
+			return err
+		}
+		for _, backingKey := range lineageKeys {
+			if err := clearSQLiteSession(context.Background(), mem.db, backingKey); err != nil {
+				return err
+			}
+		}
+		if err := clearSessionLineage(context.Background(), mem.db, sessionKey); err != nil {
 			return err
 		}
 		closeSessionMemory(s.mem)
@@ -304,7 +349,16 @@ func (sm *SessionManager) ClearHistory(sessionKey string) error {
 		return err
 	}
 	defer closeSessionMemory(mem)
-	return mem.Clear(context.Background())
+	lineageKeys, err := listSessionLineageKeys(context.Background(), mem.db, sessionKey)
+	if err != nil {
+		return err
+	}
+	for _, backingKey := range lineageKeys {
+		if err := clearSQLiteSession(context.Background(), mem.db, backingKey); err != nil {
+			return err
+		}
+	}
+	return clearSessionLineage(context.Background(), mem.db, sessionKey)
 }
 
 func sessionDBPath(cfg *config.Config) string {
@@ -540,6 +594,11 @@ func (s *Session) handleInbound(ctx context.Context, msg bus.InboundMessage, ses
 	s.mgr.emitProgress(ctx, ProgressEvent{Channel: msg.Channel, ChatID: chatID, Kind: ProgressTurnStarted})
 
 	response, usage, toolCalls, err := s.runDetailedTurn(actx, input)
+	if err != nil && isContextOverflowError(err) {
+		response, err = s.handoffToSummarySession(actx, msg.Channel, chatID, input)
+		usage = nil
+		toolCalls = 0
+	}
 	elapsed := time.Since(start)
 	responseBytes := len(response)
 	if err != nil {
@@ -666,6 +725,13 @@ func (s *Session) turnCanceled(ctx context.Context, turnSeq uint64, err error) b
 
 func isExpectedCancellation(err error) bool {
 	return errors.Is(err, context.Canceled)
+}
+
+func (sm *SessionManager) buildSessionAgent(mem interfaces.Memory) (agentRunner, error) {
+	if sm.agentFactory != nil {
+		return sm.agentFactory(mem)
+	}
+	return buildAgentWithMemory(sm.cfg, sm.tools, mem)
 }
 
 func (s *Session) runStreamingTurn(
@@ -914,6 +980,123 @@ func firstInt(m map[string]interface{}, keys ...string) (int, bool) {
 		}
 	}
 	return 0, false
+}
+
+func (s *Session) handoffToSummarySession(ctx context.Context, channel, chatID, input string) (string, error) {
+	messages, err := s.mem.GetMessages(ctx)
+	if err != nil {
+		return "", fmt.Errorf("load session history: %w", err)
+	}
+
+	summary, err := s.generateSummary(ctx, buildSummaryInput(messages))
+	if err != nil {
+		return "", err
+	}
+
+	if s.mgr.bus != nil {
+		_ = s.mgr.bus.PublishOutbound(ctx, bus.OutboundMessage{
+			Channel:    channel,
+			ChatID:     chatID,
+			SessionKey: s.stableKey,
+			Content:    "Summarizing the conversation to keep going...",
+		})
+	}
+
+	newBackingKey := nextSummarySessionKey(s.stableKey)
+	newMem, err := NewSQLiteSessionMemory(ctx, sessionDBPath(s.mgr.cfg), newBackingKey)
+	if err != nil {
+		return "", fmt.Errorf("create summary session: %w", err)
+	}
+	if err := newMem.AddMessage(ctx, interfaces.Message{
+		Role:    interfaces.MessageRoleAssistant,
+		Content: "Conversation summary:\n" + summary,
+	}); err != nil {
+		closeSessionMemory(newMem)
+		return "", fmt.Errorf("seed summary session: %w", err)
+	}
+
+	newAgent, err := s.mgr.buildSessionAgent(newMem)
+	if err != nil {
+		closeSessionMemory(newMem)
+		return "", fmt.Errorf("build summary session agent: %w", err)
+	}
+	if err := setActiveSessionKey(ctx, newMem.db, s.stableKey, newBackingKey); err != nil {
+		closeSessionMemory(newMem)
+		return "", err
+	}
+
+	oldMem := s.mem
+	s.mu.Lock()
+	s.mem = newMem
+	s.agent = newAgent
+	s.backingKey = newBackingKey
+	s.activatedSkills = make(map[string]bool)
+	s.mu.Unlock()
+	closeSessionMemory(oldMem)
+
+	response, err := newAgent.Run(ctx, input)
+	if err != nil {
+		return "", err
+	}
+	return response, nil
+}
+
+func (s *Session) generateSummary(ctx context.Context, transcript string) (string, error) {
+	factory := s.mgr.summaryFactory
+	if factory == nil {
+		factory = func() (agentRunner, error) { return buildSummaryAgent(s.mgr.cfg) }
+	}
+	summarizer, err := factory()
+	if err != nil {
+		return "", fmt.Errorf("build summary agent: %w", err)
+	}
+
+	prompt := "Summarize this prior conversation for future turns.\n" +
+		"Preserve user goals, decisions, constraints, facts, unfinished work, and explicit preferences.\n" +
+		"Do not preserve temporary skill instructions.\n" +
+		"Keep it concise and structured.\n\nConversation:\n" + transcript
+
+	summary, err := summarizer.Run(ctx, prompt)
+	if err != nil {
+		return "", fmt.Errorf("generate summary: %w", err)
+	}
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return "", errors.New("generate summary: empty response")
+	}
+	return summary, nil
+}
+
+func buildSummaryInput(messages []interfaces.Message) string {
+	var sb strings.Builder
+	for _, msg := range messages {
+		if msg.Role == interfaces.MessageRoleSystem {
+			continue
+		}
+		content := strings.TrimSpace(msg.Content)
+		if content == "" {
+			continue
+		}
+		sb.WriteString(string(msg.Role))
+		sb.WriteString(": ")
+		sb.WriteString(content)
+		sb.WriteString("\n\n")
+	}
+	return strings.TrimSpace(sb.String())
+}
+
+func isContextOverflowError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "maximum context length") ||
+		strings.Contains(msg, "context length exceeded") ||
+		strings.Contains(msg, "reduce the length")
+}
+
+func nextSummarySessionKey(stableKey string) string {
+	return fmt.Sprintf("%s#summary-%d", stableKey, time.Now().UnixNano())
 }
 
 // transcribeAudioInMessage resolves audio media refs, transcribes them, and

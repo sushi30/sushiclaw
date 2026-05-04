@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/sushi30/sushiclaw/pkg/bus"
+	"github.com/sushi30/sushiclaw/pkg/config"
 	"github.com/sushi30/sushiclaw/pkg/logger"
 )
 
@@ -480,6 +481,81 @@ func (s *scriptedRunner) RunStream(ctx context.Context, input string) (<-chan in
 		return nil, errors.New("RunStream should not be called")
 	}
 	return s.runStream(ctx, input)
+}
+
+func TestSessionManagerContextOverflowCreatesNewSummarySession(t *testing.T) {
+	ctx := t.Context()
+	extBus := bus.NewMessageBus()
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{Defaults: config.AgentDefaults{ModelName: "test-model"}},
+		ModelList: []config.ModelConfig{{
+			ModelName: "test-model",
+			Model:     "gpt-4o",
+			APIKey:    config.NewSecureString("test-key"),
+		}},
+		Sessions: config.SessionsConfig{Directory: t.TempDir()},
+	}
+
+	seed, err := NewSQLiteSessionMemory(ctx, filepath.Join(cfg.Sessions.Directory, "sessions.db"), "telegram:chat1")
+	require.NoError(t, err)
+	require.NoError(t, seed.AddMessage(ctx, interfaces.Message{Role: interfaces.MessageRoleUser, Content: "remember this"}))
+	require.NoError(t, seed.Close())
+
+	overflowErr := errors.New("maximum context length exceeded")
+	factoryCalls := 0
+	sm := &SessionManager{
+		cfg:      cfg,
+		bus:      extBus,
+		sessions: make(map[string]*Session),
+		summaryFactory: func() (agentRunner, error) {
+			return &mockRunner{runResult: "Compact summary"}, nil
+		},
+		agentFactory: func(mem interfaces.Memory) (agentRunner, error) {
+			factoryCalls++
+			if factoryCalls == 1 {
+				return &mockRunner{runErr: overflowErr}, nil
+			}
+			return &mockRunner{runResult: "retried"}, nil
+		},
+	}
+
+	session, err := sm.getOrCreateSession("telegram:chat1")
+	require.NoError(t, err)
+	session.activatedSkills["python"] = true
+
+	sm.Dispatch(ctx, bus.InboundMessage{
+		Channel: "telegram",
+		ChatID:  "chat1",
+		Content: "new request",
+	})
+
+	notice := requireOutboundMessage(t, extBus)
+	assert.Equal(t, "Summarizing the conversation to keep going...", notice.Content)
+	reply := requireOutboundMessage(t, extBus)
+	assert.Equal(t, "retried", reply.Content)
+
+	dbPath := filepath.Join(cfg.Sessions.Directory, "sessions.db")
+	stable, err := NewSQLiteSessionMemory(ctx, dbPath, "telegram:chat1")
+	require.NoError(t, err)
+	defer func() { _ = stable.Close() }()
+	msgs, err := stable.GetMessages(ctx)
+	require.NoError(t, err)
+	require.Len(t, msgs, 1)
+	assert.Equal(t, "remember this", msgs[0].Content)
+
+	activeKey, err := resolveActiveSessionKey(ctx, stable.db, "telegram:chat1")
+	require.NoError(t, err)
+	assert.NotEqual(t, "telegram:chat1", activeKey)
+
+	summary, err := NewSQLiteSessionMemory(ctx, dbPath, activeKey)
+	require.NoError(t, err)
+	defer func() { _ = summary.Close() }()
+	msgs, err = summary.GetMessages(ctx)
+	require.NoError(t, err)
+	require.Len(t, msgs, 1)
+	assert.Equal(t, interfaces.MessageRoleAssistant, msgs[0].Role)
+	assert.Contains(t, msgs[0].Content, "Compact summary")
+	assert.Empty(t, session.activatedSkills)
 }
 
 func streamEvents(events ...interfaces.AgentStreamEvent) <-chan interfaces.AgentStreamEvent {

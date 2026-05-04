@@ -461,10 +461,17 @@ func (s *scriptedRunner) Run(ctx context.Context, input string) (string, error) 
 }
 
 func (s *scriptedRunner) RunDetailed(ctx context.Context, input string) (*interfaces.AgentResponse, error) {
-	if s.runDetailed == nil {
-		return nil, errors.New("RunDetailed should not be called")
+	if s.runDetailed != nil {
+		return s.runDetailed(ctx, input)
 	}
-	return s.runDetailed(ctx, input)
+	if s.run != nil {
+		content, err := s.run(ctx, input)
+		if err != nil {
+			return nil, err
+		}
+		return &interfaces.AgentResponse{Content: content}, nil
+	}
+	return nil, errors.New("RunDetailed should not be called")
 }
 
 func (s *scriptedRunner) RunStream(ctx context.Context, input string) (<-chan interfaces.AgentStreamEvent, error) {

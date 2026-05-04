@@ -14,14 +14,15 @@ import (
 	"github.com/sushi30/sushiclaw/internal/envresolve"
 	"github.com/sushi30/sushiclaw/internal/gateway"
 	"github.com/sushi30/sushiclaw/internal/version"
+	"github.com/sushi30/sushiclaw/pkg/bus"
 	"github.com/sushi30/sushiclaw/pkg/config"
 	"github.com/sushi30/sushiclaw/pkg/cron"
 	"github.com/sushi30/sushiclaw/pkg/logger"
 
 	// Register owned channel implementations.
 	_ "github.com/sushi30/sushiclaw/pkg/channels/email"
-	_ "github.com/sushi30/sushiclaw/pkg/channels/websocket"
 	_ "github.com/sushi30/sushiclaw/pkg/channels/telegram"
+	_ "github.com/sushi30/sushiclaw/pkg/channels/websocket"
 	_ "github.com/sushi30/sushiclaw/pkg/channels/whatsapp_native"
 )
 
@@ -114,6 +115,7 @@ func newCronAddCommand() *cobra.Command {
 				Message:   message,
 				Channel:   channel,
 				ChatID:    chatID,
+				Context:   bus.NewOutboundContext(channel, chatID, ""),
 				CronExpr:  cronExpr,
 				Deliver:   deliver,
 				Command:   command,

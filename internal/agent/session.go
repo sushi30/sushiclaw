@@ -567,6 +567,7 @@ func (s *Session) handleInbound(ctx context.Context, msg bus.InboundMessage, ses
 	actx := exec.WithChatID(ctx, chatID)
 	actx = toolctx.WithChannel(actx, msg.Channel)
 	actx = toolctx.WithSenderID(actx, msg.SenderID)
+	actx = toolctx.WithInboundContext(actx, msg.Context)
 
 	input := msg.Content
 	if len(msg.Media) > 0 {
@@ -639,7 +640,7 @@ func (s *Session) handleInbound(ctx context.Context, msg bus.InboundMessage, ses
 				Channel:    msg.Channel,
 				ChatID:     chatID,
 				SessionKey: sessionKey,
-				Content:    fmt.Sprintf("Error: %v", err),
+				Content:    userFacingRunError(err),
 			}))
 		}
 		s.mgr.emitProgress(ctx, ProgressEvent{Channel: msg.Channel, ChatID: chatID, Kind: ProgressFailed, Error: err, Elapsed: elapsed})
@@ -759,6 +760,27 @@ func (sm *SessionManager) buildSessionAgent(mem interfaces.Memory) (agentRunner,
 		return sm.agentFactory(mem)
 	}
 	return buildAgentWithMemory(sm.cfg, sm.tools, mem)
+}
+
+func userFacingRunError(err error) string {
+	if err == nil {
+		return "Error: unknown failure"
+	}
+	if isOpenRouterLimitError(err) {
+		return "This request hit OpenRouter's context or token limit. The turn was not completed. Clear or shorten the session history and try again."
+	}
+	return fmt.Sprintf("Error: %v", err)
+}
+
+func isOpenRouterLimitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "context_length_exceeded") ||
+		strings.Contains(msg, "max_tokens_exceeded") ||
+		strings.Contains(msg, "token_limit_exceeded") ||
+		strings.Contains(msg, "string_too_long")
 }
 
 func (s *Session) runStreamingTurn(

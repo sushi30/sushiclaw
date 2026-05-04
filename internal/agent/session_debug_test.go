@@ -269,6 +269,39 @@ func TestSessionManagerTurnSummaryLogsUsageAndDuration(t *testing.T) {
 	assert.Contains(t, logs, "response_bytes")
 }
 
+func TestSessionManagerOpenRouterLimitErrorsNotifyUser(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{name: "context length exceeded", err: errors.New("openrouter: context_length_exceeded")},
+		{name: "max tokens exceeded", err: errors.New("provider returned max_tokens_exceeded while generating response")},
+		{name: "token limit exceeded", err: errors.New("token_limit_exceeded")},
+		{name: "string too long", err: errors.New("string_too_long")},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			extBus := bus.NewMessageBus()
+			progress := &collectingProgress{}
+			sm := &SessionManager{bus: extBus, progress: progress}
+			session := &Session{agent: &mockRunner{detailedErr: tc.err}, mgr: sm}
+
+			turnCtx, turnSeq, turnDone := session.startTurn(t.Context())
+			session.handleInbound(turnCtx, inbound("telegram", "chat1", "bad"), "telegram:chat1", turnSeq, turnDone)
+
+			msg := requireOutboundMessage(t, extBus)
+			assert.Equal(t, bus.MessageKindSystem, msg.Context.Raw["message_kind"])
+			assert.Equal(t, "[system] This request hit OpenRouter's context or token limit. The turn was not completed. Clear or shorten the session history and try again.", msg.Content)
+			assertNoOutboundMessage(t, extBus)
+			require.Len(t, progress.summaries, 1)
+			assert.False(t, progress.summaries[0].Success)
+			assert.ErrorIs(t, progress.summaries[0].Error, tc.err)
+			assertHasEvent(t, progress.events, ProgressFailed)
+		})
+	}
+}
+
 func TestSessionManagerStreamingStartupFallbackUsesDetailedUsage(t *testing.T) {
 	startErr := errors.New("no streaming")
 	progress := &collectingProgress{}

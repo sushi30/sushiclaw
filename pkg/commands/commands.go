@@ -339,11 +339,7 @@ func listSkillsHandler(_ context.Context, req Request, rt *Runtime) error {
 	var sb strings.Builder
 	sb.WriteString("Available skills:\n")
 	for _, s := range skills {
-		sb.WriteString("• " + s.Name)
-		if s.Description != "" {
-			sb.WriteString(" — " + s.Description)
-		}
-		sb.WriteByte('\n')
+		sb.WriteString("• " + s.Name + "\n")
 	}
 	return req.Reply(strings.TrimRight(sb.String(), "\n"))
 }

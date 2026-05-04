@@ -33,6 +33,8 @@ type SessionManager struct {
 	bus             *bus.MessageBus
 	tools           []interfaces.Tool
 	progress        ProgressSink
+	agentFactory    func(mem interfaces.Memory) (agentRunner, error)
+	summaryFactory  func() (agentRunner, error)
 	mediaStore      media.MediaStore
 	transcriber     asr.Transcriber
 	sessions        map[string]*Session
@@ -50,6 +52,8 @@ type Session struct {
 	activeTurnCancel context.CancelFunc
 	activeTurnDone   chan struct{}
 	activeTurnSeq    uint64
+	stableKey        string
+	backingKey       string
 	lastUsed         time.Time
 	mu               sync.RWMutex
 	mgr              *SessionManager
@@ -143,6 +147,14 @@ func buildAgentWithMemory(cfg *config.Config, tools []interfaces.Tool, mem inter
 	return a, nil
 }
 
+func buildSummaryAgent(cfg *config.Config) (agentRunner, error) {
+	summaryCfg := *cfg
+	if summaryCfg.Agents.Defaults.Summary.Model != "" {
+		summaryCfg.Agents.Defaults.ModelName = summaryCfg.Agents.Defaults.Summary.Model
+	}
+	return buildAgentWithMemory(&summaryCfg, nil, NewInMemoryMemory())
+}
+
 // toAgentSDKMCPConfig converts sushiclaw MCPConfig to agent-sdk-go MCPConfiguration.
 func toAgentSDKMCPConfig(cfg config.MCPConfig) *agentsdk.MCPConfiguration {
 	if len(cfg.MCPServers) == 0 {
@@ -179,6 +191,8 @@ func NewSessionManager(cfg *config.Config, messageBus *bus.MessageBus, tools []i
 		cfg:             cfg,
 		bus:             messageBus,
 		tools:           tools,
+		agentFactory:    func(mem interfaces.Memory) (agentRunner, error) { return buildAgentWithMemory(cfg, tools, mem) },
+		summaryFactory:  func() (agentRunner, error) { return buildSummaryAgent(cfg) },
 		mediaStore:      store,
 		sessions:        make(map[string]*Session),
 		ttl:             30 * 24 * time.Hour,
@@ -269,7 +283,23 @@ func (sm *SessionManager) getOrCreateSession(key string) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	a, err := buildAgentWithMemory(sm.cfg, sm.tools, mem)
+	activeKey, err := resolveActiveSessionKey(context.Background(), mem.db, key)
+	if err != nil {
+		closeSessionMemory(mem)
+		return nil, err
+	}
+	if activeKey != key {
+		closeSessionMemory(mem)
+		mem, err = NewSQLiteSessionMemory(context.Background(), sessionDBPath(sm.cfg), activeKey)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if err := ensureSessionLineage(context.Background(), mem.db, key, activeKey); err != nil {
+		closeSessionMemory(mem)
+		return nil, err
+	}
+	a, err := sm.buildSessionAgent(mem)
 	if err != nil {
 		closeSessionMemory(mem)
 		return nil, err
@@ -279,6 +309,8 @@ func (sm *SessionManager) getOrCreateSession(key string) (*Session, error) {
 		agent:           a,
 		mem:             mem,
 		activatedSkills: make(map[string]bool),
+		stableKey:       key,
+		backingKey:      activeKey,
 		lastUsed:        time.Now(),
 		mgr:             sm,
 	}
@@ -292,7 +324,24 @@ func (sm *SessionManager) ClearHistory(sessionKey string) error {
 	defer sm.mu.Unlock()
 	if s, ok := sm.sessions[sessionKey]; ok {
 		s.stopTurn()
-		if err := s.mem.Clear(context.Background()); err != nil {
+		mem, ok := s.mem.(*SQLiteSessionMemory)
+		if !ok {
+			if err := s.mem.Clear(context.Background()); err != nil {
+				return err
+			}
+			delete(sm.sessions, sessionKey)
+			return nil
+		}
+		lineageKeys, err := listSessionLineageKeys(context.Background(), mem.db, sessionKey)
+		if err != nil {
+			return err
+		}
+		for _, backingKey := range lineageKeys {
+			if err := clearSQLiteSession(context.Background(), mem.db, backingKey); err != nil {
+				return err
+			}
+		}
+		if err := clearSessionLineage(context.Background(), mem.db, sessionKey); err != nil {
 			return err
 		}
 		closeSessionMemory(s.mem)
@@ -304,7 +353,16 @@ func (sm *SessionManager) ClearHistory(sessionKey string) error {
 		return err
 	}
 	defer closeSessionMemory(mem)
-	return mem.Clear(context.Background())
+	lineageKeys, err := listSessionLineageKeys(context.Background(), mem.db, sessionKey)
+	if err != nil {
+		return err
+	}
+	for _, backingKey := range lineageKeys {
+		if err := clearSQLiteSession(context.Background(), mem.db, backingKey); err != nil {
+			return err
+		}
+	}
+	return clearSessionLineage(context.Background(), mem.db, sessionKey)
 }
 
 func sessionDBPath(cfg *config.Config) string {
@@ -539,7 +597,35 @@ func (s *Session) handleInbound(ctx context.Context, msg bus.InboundMessage, ses
 	start := time.Now()
 	s.mgr.emitProgress(ctx, ProgressEvent{Channel: msg.Channel, ChatID: chatID, Kind: ProgressTurnStarted})
 
+	if s.shouldSummarizeBeforeTurn(input) {
+		response, err := s.handoffToSummarySession(actx, msg.Channel, chatID, input)
+		if err == nil {
+			if response != "" && s.mgr.bus != nil {
+				_ = s.mgr.bus.PublishOutbound(ctx, bus.OutboundMessage{
+					Channel:    msg.Channel,
+					ChatID:     chatID,
+					SessionKey: sessionKey,
+					Content:    response,
+				})
+			}
+			s.mgr.emitProgress(ctx, ProgressEvent{Channel: msg.Channel, ChatID: chatID, Kind: ProgressCompleted, Elapsed: time.Since(start)})
+			s.mgr.emitSummary(ctx, ProgressSummary{
+				Channel:       msg.Channel,
+				ChatID:        chatID,
+				Success:       true,
+				Duration:      time.Since(start),
+				ResponseBytes: len(response),
+			})
+			return
+		}
+	}
+
 	response, usage, toolCalls, err := s.runDetailedTurn(actx, input)
+	if err != nil && s.mgr != nil && s.mgr.cfg != nil && s.mgr.cfg.Agents.Defaults.Summary.Enabled && isContextOverflowError(err) {
+		response, err = s.handoffToSummarySession(actx, msg.Channel, chatID, input)
+		usage = nil
+		toolCalls = 0
+	}
 	elapsed := time.Since(start)
 	responseBytes := len(response)
 	if err != nil {
@@ -666,6 +752,13 @@ func (s *Session) turnCanceled(ctx context.Context, turnSeq uint64, err error) b
 
 func isExpectedCancellation(err error) bool {
 	return errors.Is(err, context.Canceled)
+}
+
+func (sm *SessionManager) buildSessionAgent(mem interfaces.Memory) (agentRunner, error) {
+	if sm.agentFactory != nil {
+		return sm.agentFactory(mem)
+	}
+	return buildAgentWithMemory(sm.cfg, sm.tools, mem)
 }
 
 func (s *Session) runStreamingTurn(
@@ -914,6 +1007,224 @@ func firstInt(m map[string]interface{}, keys ...string) (int, bool) {
 		}
 	}
 	return 0, false
+}
+
+func (s *Session) shouldSummarizeBeforeTurn(input string) bool {
+	if s == nil || s.mgr == nil || s.mgr.cfg == nil {
+		return false
+	}
+	summaryCfg := s.mgr.cfg.Agents.Defaults.Summary
+	if !summaryCfg.Enabled || summaryCfg.TokenTrigger <= 0 {
+		return false
+	}
+	return approximateTokenCount(input)+approximateSessionTokens(s) >= summaryCfg.TokenTrigger
+}
+
+func (s *Session) handoffToSummarySession(ctx context.Context, channel, chatID, input string) (string, error) {
+	if s == nil || s.mgr == nil || s.mgr.cfg == nil || !s.mgr.cfg.Agents.Defaults.Summary.Enabled {
+		return "", errors.New("session summarization is disabled")
+	}
+	messages, err := s.mem.GetMessages(ctx)
+	if err != nil {
+		return "", fmt.Errorf("load session history: %w", err)
+	}
+
+	summary, err := s.generateSummary(ctx, buildSummaryInput(messages))
+	if err != nil {
+		return "", err
+	}
+
+	if s.mgr.bus != nil {
+		_ = s.mgr.bus.PublishOutbound(ctx, bus.OutboundMessage{
+			Channel:    channel,
+			ChatID:     chatID,
+			SessionKey: s.stableKey,
+			Content:    "Summarizing the conversation to keep going...",
+		})
+	}
+
+	newBackingKey := nextSummarySessionKey(s.stableKey)
+	newMem, err := NewSQLiteSessionMemory(ctx, sessionDBPath(s.mgr.cfg), newBackingKey)
+	if err != nil {
+		return "", fmt.Errorf("create summary session: %w", err)
+	}
+	if err := newMem.AddMessage(ctx, interfaces.Message{
+		Role:    interfaces.MessageRoleAssistant,
+		Content: "Conversation summary:\n" + summary,
+	}); err != nil {
+		closeSessionMemory(newMem)
+		return "", fmt.Errorf("seed summary session: %w", err)
+	}
+
+	newAgent, err := s.mgr.buildSessionAgent(newMem)
+	if err != nil {
+		closeSessionMemory(newMem)
+		return "", fmt.Errorf("build summary session agent: %w", err)
+	}
+	if err := setActiveSessionKey(ctx, newMem.db, s.stableKey, newBackingKey); err != nil {
+		closeSessionMemory(newMem)
+		return "", err
+	}
+
+	oldMem := s.mem
+	s.mu.Lock()
+	s.mem = newMem
+	s.agent = newAgent
+	s.backingKey = newBackingKey
+	s.activatedSkills = make(map[string]bool)
+	s.mu.Unlock()
+	closeSessionMemory(oldMem)
+
+	response, err := newAgent.Run(ctx, input)
+	if err != nil {
+		return "", err
+	}
+	return response, nil
+}
+
+func (s *Session) generateSummary(ctx context.Context, transcript string) (string, error) {
+	return s.generateSummaryWithDepth(ctx, transcript, 0)
+}
+
+func (s *Session) generateSummaryWithDepth(ctx context.Context, transcript string, depth int) (string, error) {
+	if strings.TrimSpace(transcript) == "" {
+		return "", errors.New("generate summary: empty transcript")
+	}
+	if depth > 4 {
+		return "", errors.New("generate summary: exceeded chunking depth")
+	}
+
+	factory := s.mgr.summaryFactory
+	if factory == nil {
+		factory = func() (agentRunner, error) { return buildSummaryAgent(s.mgr.cfg) }
+	}
+	summarizer, err := factory()
+	if err != nil {
+		return "", fmt.Errorf("build summary agent: %w", err)
+	}
+
+	prompt := structuredSummaryPrompt(transcript)
+
+	summary, err := summarizer.Run(ctx, prompt)
+	if err != nil {
+		if isContextOverflowError(err) {
+			return s.chunkedSummary(ctx, transcript, depth+1)
+		}
+		return "", fmt.Errorf("generate summary: %w", err)
+	}
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return "", errors.New("generate summary: empty response")
+	}
+	return summary, nil
+}
+
+func (s *Session) chunkedSummary(ctx context.Context, transcript string, depth int) (string, error) {
+	chunks := splitTranscriptForSummary(transcript)
+	if len(chunks) <= 1 {
+		return "", errors.New("generate summary: transcript still too large after chunking")
+	}
+
+	partials := make([]string, 0, len(chunks))
+	for i, chunk := range chunks {
+		partial, err := s.generateSummaryWithDepth(ctx, chunk, depth)
+		if err != nil {
+			return "", err
+		}
+		partials = append(partials, fmt.Sprintf("Chunk %d summary:\n%s", i+1, partial))
+	}
+
+	return s.generateSummaryWithDepth(ctx, strings.Join(partials, "\n\n"), depth)
+}
+
+func buildSummaryInput(messages []interfaces.Message) string {
+	var sb strings.Builder
+	for _, msg := range messages {
+		if msg.Role == interfaces.MessageRoleSystem {
+			continue
+		}
+		content := strings.TrimSpace(msg.Content)
+		if content == "" {
+			continue
+		}
+		sb.WriteString(string(msg.Role))
+		sb.WriteString(": ")
+		sb.WriteString(content)
+		sb.WriteString("\n\n")
+	}
+	return strings.TrimSpace(sb.String())
+}
+
+func structuredSummaryPrompt(transcript string) string {
+	return "Summarize this prior conversation for future turns.\n" +
+		"Return a compact structured summary with exactly these markdown headings:\n" +
+		"## Goals\n## Key Facts\n## Decisions\n## Preferences\n## Open Threads\n## Resources\n" +
+		"Rules:\n" +
+		"- Preserve user goals, decisions, constraints, explicit preferences, and unresolved tasks.\n" +
+		"- Do not preserve temporary skill instructions or internal orchestration details.\n" +
+		"- Keep each section concise and omit empty bullets when there is nothing to report.\n\n" +
+		"Conversation:\n" + transcript
+}
+
+func isContextOverflowError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "maximum context length") ||
+		strings.Contains(msg, "context length exceeded") ||
+		strings.Contains(msg, "reduce the length")
+}
+
+func nextSummarySessionKey(stableKey string) string {
+	return fmt.Sprintf("%s#summary-%d", stableKey, time.Now().UnixNano())
+}
+
+func approximateSessionTokens(s *Session) int {
+	msgs, err := s.mem.GetMessages(context.Background())
+	if err != nil {
+		return 0
+	}
+	total := 0
+	for _, msg := range msgs {
+		total += approximateTokenCount(msg.Content)
+	}
+	return total
+}
+
+func approximateTokenCount(text string) int {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return 0
+	}
+	return max(1, len([]rune(text))/4)
+}
+
+func splitTranscriptForSummary(transcript string) []string {
+	parts := strings.Split(transcript, "\n\n")
+	if len(parts) <= 1 {
+		runes := []rune(transcript)
+		if len(runes) < 2 {
+			return []string{transcript}
+		}
+		mid := len(runes) / 2
+		return []string{string(runes[:mid]), string(runes[mid:])}
+	}
+
+	mid := len(parts) / 2
+	left := strings.TrimSpace(strings.Join(parts[:mid], "\n\n"))
+	right := strings.TrimSpace(strings.Join(parts[mid:], "\n\n"))
+	var chunks []string
+	if left != "" {
+		chunks = append(chunks, left)
+	}
+	if right != "" {
+		chunks = append(chunks, right)
+	}
+	if len(chunks) == 0 {
+		return []string{transcript}
+	}
+	return chunks
 }
 
 // transcribeAudioInMessage resolves audio media refs, transcribes them, and

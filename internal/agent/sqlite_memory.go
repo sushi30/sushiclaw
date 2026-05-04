@@ -25,6 +25,17 @@ CREATE TABLE IF NOT EXISTS messages (
 	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_key, id);
+CREATE TABLE IF NOT EXISTS session_heads (
+	stable_key TEXT PRIMARY KEY,
+	active_key TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS session_lineage (
+	stable_key TEXT NOT NULL,
+	backing_key TEXT NOT NULL,
+	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	PRIMARY KEY (stable_key, backing_key)
+);
+CREATE INDEX IF NOT EXISTS idx_session_lineage_stable_key ON session_lineage(stable_key, backing_key);
 `
 
 // SQLiteSessionMemory stores one session's conversation in a shared SQLite DB.
@@ -155,6 +166,85 @@ func (m *SQLiteSessionMemory) Close() error {
 func clearSQLiteSession(ctx context.Context, db *sql.DB, sessionKey string) error {
 	if _, err := db.ExecContext(ctx, `DELETE FROM messages WHERE session_key = ?`, sessionKey); err != nil {
 		return fmt.Errorf("clear session messages: %w", err)
+	}
+	return nil
+}
+
+func resolveActiveSessionKey(ctx context.Context, db *sql.DB, stableKey string) (string, error) {
+	var activeKey string
+	err := db.QueryRowContext(ctx, `SELECT active_key FROM session_heads WHERE stable_key = ?`, stableKey).Scan(&activeKey)
+	if err == nil {
+		return activeKey, nil
+	}
+	if err == sql.ErrNoRows {
+		return stableKey, nil
+	}
+	return "", fmt.Errorf("resolve active session key: %w", err)
+}
+
+func setActiveSessionKey(ctx context.Context, db *sql.DB, stableKey, activeKey string) error {
+	if err := ensureSessionLineage(ctx, db, stableKey, stableKey); err != nil {
+		return err
+	}
+	if err := ensureSessionLineage(ctx, db, stableKey, activeKey); err != nil {
+		return err
+	}
+	if _, err := db.ExecContext(ctx, `
+INSERT INTO session_heads (stable_key, active_key)
+VALUES (?, ?)
+ON CONFLICT(stable_key) DO UPDATE SET active_key = excluded.active_key`,
+		stableKey, activeKey,
+	); err != nil {
+		return fmt.Errorf("set active session key: %w", err)
+	}
+	return nil
+}
+
+func ensureSessionLineage(ctx context.Context, db *sql.DB, stableKey, backingKey string) error {
+	if _, err := db.ExecContext(ctx, `
+INSERT OR IGNORE INTO session_lineage (stable_key, backing_key)
+VALUES (?, ?)`,
+		stableKey, backingKey,
+	); err != nil {
+		return fmt.Errorf("ensure session lineage: %w", err)
+	}
+	return nil
+}
+
+func listSessionLineageKeys(ctx context.Context, db *sql.DB, stableKey string) ([]string, error) {
+	rows, err := db.QueryContext(ctx, `
+SELECT backing_key
+FROM session_lineage
+WHERE stable_key = ?
+ORDER BY created_at, backing_key`, stableKey)
+	if err != nil {
+		return nil, fmt.Errorf("list session lineage: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var keys []string
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, fmt.Errorf("scan session lineage: %w", err)
+		}
+		keys = append(keys, key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list session lineage: %w", err)
+	}
+	if len(keys) == 0 {
+		return []string{stableKey}, nil
+	}
+	return keys, nil
+}
+
+func clearSessionLineage(ctx context.Context, db *sql.DB, stableKey string) error {
+	if _, err := db.ExecContext(ctx, `DELETE FROM session_heads WHERE stable_key = ?`, stableKey); err != nil {
+		return fmt.Errorf("clear session heads: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM session_lineage WHERE stable_key = ?`, stableKey); err != nil {
+		return fmt.Errorf("clear session lineage: %w", err)
 	}
 	return nil
 }

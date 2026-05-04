@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Ingenimax/agent-sdk-go/pkg/interfaces"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -199,6 +200,95 @@ func TestClearHistoryDeletesPersistedSession(t *testing.T) {
 	msgs, err := session.mem.GetMessages(context.Background())
 	require.NoError(t, err)
 	assert.Empty(t, msgs)
+}
+
+func TestSessionManagerUsesActiveSessionHead(t *testing.T) {
+	sessionsDir := t.TempDir()
+	dbPath := filepath.Join(sessionsDir, "sessions.db")
+	ctx := context.Background()
+
+	stable, err := NewSQLiteSessionMemory(ctx, dbPath, "telegram:chat1")
+	require.NoError(t, err)
+	require.NoError(t, stable.AddMessage(ctx, interfaces.Message{Role: interfaces.MessageRoleUser, Content: "old history"}))
+	require.NoError(t, ensureSessionLineage(ctx, stable.db, "telegram:chat1", "telegram:chat1"))
+	require.NoError(t, stable.Close())
+
+	summary, err := NewSQLiteSessionMemory(ctx, dbPath, "telegram:chat1#summary-1")
+	require.NoError(t, err)
+	require.NoError(t, summary.AddMessage(ctx, interfaces.Message{Role: interfaces.MessageRoleAssistant, Content: "Conversation summary"}))
+	require.NoError(t, setActiveSessionKey(ctx, summary.db, "telegram:chat1", "telegram:chat1#summary-1"))
+	require.NoError(t, summary.Close())
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{Defaults: config.AgentDefaults{ModelName: "test-model"}},
+		ModelList: []config.ModelConfig{{
+			ModelName: "test-model",
+			Model:     "gpt-4o",
+			APIKey:    config.NewSecureString("test-key"),
+		}},
+		Sessions: config.SessionsConfig{Directory: sessionsDir},
+	}
+
+	sm, err := NewSessionManager(cfg, bus.NewMessageBus(), nil, nil)
+	require.NoError(t, err)
+
+	session, err := sm.getOrCreateSession("telegram:chat1")
+	require.NoError(t, err)
+
+	msgs, err := session.mem.GetMessages(ctx)
+	require.NoError(t, err)
+	require.Len(t, msgs, 1)
+	assert.Equal(t, "Conversation summary", msgs[0].Content)
+}
+
+func TestClearHistoryDeletesSessionLineage(t *testing.T) {
+	sessionsDir := t.TempDir()
+	dbPath := filepath.Join(sessionsDir, "sessions.db")
+	ctx := context.Background()
+
+	stable, err := NewSQLiteSessionMemory(ctx, dbPath, "telegram:chat1")
+	require.NoError(t, err)
+	require.NoError(t, stable.AddMessage(ctx, interfaces.Message{Role: interfaces.MessageRoleUser, Content: "old history"}))
+	require.NoError(t, ensureSessionLineage(ctx, stable.db, "telegram:chat1", "telegram:chat1"))
+	require.NoError(t, stable.Close())
+
+	summary, err := NewSQLiteSessionMemory(ctx, dbPath, "telegram:chat1#summary-1")
+	require.NoError(t, err)
+	require.NoError(t, summary.AddMessage(ctx, interfaces.Message{Role: interfaces.MessageRoleAssistant, Content: "Conversation summary"}))
+	require.NoError(t, setActiveSessionKey(ctx, summary.db, "telegram:chat1", "telegram:chat1#summary-1"))
+	require.NoError(t, summary.Close())
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{Defaults: config.AgentDefaults{ModelName: "test-model"}},
+		ModelList: []config.ModelConfig{{
+			ModelName: "test-model",
+			Model:     "gpt-4o",
+			APIKey:    config.NewSecureString("test-key"),
+		}},
+		Sessions: config.SessionsConfig{Directory: sessionsDir},
+	}
+
+	sm, err := NewSessionManager(cfg, bus.NewMessageBus(), nil, nil)
+	require.NoError(t, err)
+	require.NoError(t, sm.ClearHistory("telegram:chat1"))
+
+	reopenedStable, err := NewSQLiteSessionMemory(ctx, dbPath, "telegram:chat1")
+	require.NoError(t, err)
+	defer func() { _ = reopenedStable.Close() }()
+	msgs, err := reopenedStable.GetMessages(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, msgs)
+
+	reopenedSummary, err := NewSQLiteSessionMemory(ctx, dbPath, "telegram:chat1#summary-1")
+	require.NoError(t, err)
+	defer func() { _ = reopenedSummary.Close() }()
+	msgs, err = reopenedSummary.GetMessages(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, msgs)
+
+	activeKey, err := resolveActiveSessionKey(ctx, reopenedSummary.db, "telegram:chat1")
+	require.NoError(t, err)
+	assert.Equal(t, "telegram:chat1", activeKey)
 }
 
 // TestSessionManagerEviction verifies that stale sessions are evicted by the

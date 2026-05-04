@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/sushi30/sushiclaw/pkg/bus"
+	"github.com/sushi30/sushiclaw/pkg/config"
 	"github.com/sushi30/sushiclaw/pkg/logger"
 )
 
@@ -24,9 +26,13 @@ type mockRunner struct {
 	detailedErr error
 	runResult   string
 	runErr      error
+	runFunc     func(string) (string, error)
 }
 
-func (m *mockRunner) Run(context.Context, string) (string, error) {
+func (m *mockRunner) Run(_ context.Context, input string) (string, error) {
+	if m.runFunc != nil {
+		return m.runFunc(input)
+	}
 	if m.runErr != nil {
 		return "", m.runErr
 	}
@@ -480,6 +486,146 @@ func (s *scriptedRunner) RunStream(ctx context.Context, input string) (<-chan in
 		return nil, errors.New("RunStream should not be called")
 	}
 	return s.runStream(ctx, input)
+}
+
+func TestSessionManagerContextOverflowCreatesNewSummarySession(t *testing.T) {
+	ctx := t.Context()
+	extBus := bus.NewMessageBus()
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{Defaults: config.AgentDefaults{
+			ModelName: "test-model",
+			Summary: config.SummaryConfig{
+				Enabled:      true,
+				TokenTrigger: 1024,
+				Model:        "summary-model",
+			},
+		}},
+		ModelList: []config.ModelConfig{{
+			ModelName: "test-model",
+			Model:     "gpt-4o",
+			APIKey:    config.NewSecureString("test-key"),
+		}, {
+			ModelName: "summary-model",
+			Model:     "gpt-4o-mini",
+			APIKey:    config.NewSecureString("test-key"),
+		}},
+		Sessions: config.SessionsConfig{Directory: t.TempDir()},
+	}
+
+	seed, err := NewSQLiteSessionMemory(ctx, filepath.Join(cfg.Sessions.Directory, "sessions.db"), "telegram:chat1")
+	require.NoError(t, err)
+	require.NoError(t, seed.AddMessage(ctx, interfaces.Message{Role: interfaces.MessageRoleUser, Content: "remember this"}))
+	require.NoError(t, seed.Close())
+
+	overflowErr := errors.New("maximum context length exceeded")
+	factoryCalls := 0
+	sm := &SessionManager{
+		cfg:      cfg,
+		bus:      extBus,
+		sessions: make(map[string]*Session),
+		summaryFactory: func() (agentRunner, error) {
+			return &mockRunner{runResult: "Compact summary"}, nil
+		},
+		agentFactory: func(mem interfaces.Memory) (agentRunner, error) {
+			factoryCalls++
+			if factoryCalls == 1 {
+				return &mockRunner{runErr: overflowErr}, nil
+			}
+			return &mockRunner{runResult: "retried"}, nil
+		},
+	}
+
+	session, err := sm.getOrCreateSession("telegram:chat1")
+	require.NoError(t, err)
+	session.activatedSkills["python"] = true
+
+	sm.Dispatch(ctx, bus.InboundMessage{
+		Channel: "telegram",
+		ChatID:  "chat1",
+		Content: "new request",
+	})
+
+	notice := requireOutboundMessage(t, extBus)
+	assert.Equal(t, "Summarizing the conversation to keep going...", notice.Content)
+	reply := requireOutboundMessage(t, extBus)
+	assert.Equal(t, "retried", reply.Content)
+
+	dbPath := filepath.Join(cfg.Sessions.Directory, "sessions.db")
+	stable, err := NewSQLiteSessionMemory(ctx, dbPath, "telegram:chat1")
+	require.NoError(t, err)
+	defer func() { _ = stable.Close() }()
+	msgs, err := stable.GetMessages(ctx)
+	require.NoError(t, err)
+	require.Len(t, msgs, 1)
+	assert.Equal(t, "remember this", msgs[0].Content)
+
+	activeKey, err := resolveActiveSessionKey(ctx, stable.db, "telegram:chat1")
+	require.NoError(t, err)
+	assert.NotEqual(t, "telegram:chat1", activeKey)
+
+	summary, err := NewSQLiteSessionMemory(ctx, dbPath, activeKey)
+	require.NoError(t, err)
+	defer func() { _ = summary.Close() }()
+	msgs, err = summary.GetMessages(ctx)
+	require.NoError(t, err)
+	require.Len(t, msgs, 1)
+	assert.Equal(t, interfaces.MessageRoleAssistant, msgs[0].Role)
+	assert.Contains(t, msgs[0].Content, "Compact summary")
+	assert.Empty(t, session.activatedSkills)
+}
+
+func TestSessionManagerOverflowDoesNotSummarizeWhenDisabled(t *testing.T) {
+	overflowErr := errors.New("maximum context length exceeded")
+	extBus := bus.NewMessageBus()
+	sm := &SessionManager{bus: extBus, cfg: &config.Config{}, progress: &collectingProgress{}}
+	session := &Session{agent: &mockRunner{runErr: overflowErr}, mgr: sm, stableKey: "telegram:chat1"}
+
+	turnCtx, turnSeq, turnDone := session.startTurn(t.Context())
+	session.handleInbound(turnCtx, inbound("telegram", "chat1", "bad"), "telegram:chat1", turnSeq, turnDone)
+
+	msg := requireOutboundMessage(t, extBus)
+	assert.Contains(t, msg.Content, "Error: maximum context length exceeded")
+	assertNoOutboundMessage(t, extBus)
+}
+
+func TestGenerateSummaryFallsBackToChunkedReduction(t *testing.T) {
+	ctx := t.Context()
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{Defaults: config.AgentDefaults{
+			ModelName: "test-model",
+			Summary:   config.SummaryConfig{Enabled: true, Model: "summary-model"},
+		}},
+		ModelList: []config.ModelConfig{{
+			ModelName: "test-model",
+			Model:     "gpt-4o",
+			APIKey:    config.NewSecureString("test-key"),
+		}, {
+			ModelName: "summary-model",
+			Model:     "gpt-4o-mini",
+			APIKey:    config.NewSecureString("test-key"),
+		}},
+	}
+
+	sm := &SessionManager{
+		cfg: cfg,
+		summaryFactory: func() (agentRunner, error) {
+			return &mockRunner{runFunc: func(input string) (string, error) {
+				if strings.Contains(input, "Conversation:\nuser: one") && strings.Contains(input, "assistant: two") {
+					return "", errors.New("maximum context length exceeded")
+				}
+				if strings.Contains(input, "Chunk 1 summary:") {
+					return "## Goals\n- combined\n## Key Facts\n- merged\n## Decisions\n- none\n## Preferences\n- none\n## Open Threads\n- follow up\n## Resources\n- none", nil
+				}
+				return "## Goals\n- part\n## Key Facts\n- item\n## Decisions\n- none\n## Preferences\n- none\n## Open Threads\n- none\n## Resources\n- none", nil
+			}}, nil
+		},
+	}
+	session := &Session{mgr: sm}
+
+	summary, err := session.generateSummary(ctx, "user: one\n\nassistant: two")
+	require.NoError(t, err)
+	assert.Contains(t, summary, "## Goals")
+	assert.Contains(t, summary, "combined")
 }
 
 func streamEvents(events ...interfaces.AgentStreamEvent) <-chan interfaces.AgentStreamEvent {

@@ -266,8 +266,9 @@ func TestBuildAgent_WithMCPConfig(t *testing.T) {
 					Args:    []string{"-y", "@modelcontextprotocol/server-filesystem", "/tmp"},
 				},
 				"remote": {
-					URL:   "http://localhost:3000/mcp",
-					Token: config.NewSecureString("secret-token"),
+					URL:               "http://localhost:3000/mcp",
+					Token:             config.NewSecureString("secret-token"),
+					HttpTransportMode: "streamable",
 				},
 			},
 		},

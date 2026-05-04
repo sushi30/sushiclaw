@@ -148,6 +148,11 @@ Connect the agent to [Model Context Protocol (MCP)](https://modelcontextprotocol
         "command": "npx",
         "args": ["-y", "@modelcontextprotocol/server-github"],
         "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "env://GITHUB_TOKEN" }
+      },
+      "browserbase": {
+        "url": "https://mcp.browserbase.com/mcp",
+        "token": "env://BROWSERBASE_API_KEY",
+        "httpTransportMode": "streamable"
       }
     }
   }

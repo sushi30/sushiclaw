@@ -155,12 +155,13 @@ func toAgentSDKMCPConfig(cfg config.MCPConfig) *agentsdk.MCPConfiguration {
 			token = s.Token.String()
 		}
 		servers[name] = agentsdk.MCPServerConfig{
-			Command:      s.Command,
-			Args:         s.Args,
-			Env:          s.Env,
-			URL:          s.URL,
-			Token:        token,
-			AllowedTools: s.AllowedTools,
+			Command:           s.Command,
+			Args:              s.Args,
+			Env:               s.Env,
+			URL:               s.URL,
+			Token:             token,
+			HttpTransportMode: s.HttpTransportMode,
+			AllowedTools:      s.AllowedTools,
 		}
 	}
 	return &agentsdk.MCPConfiguration{

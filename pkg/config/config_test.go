@@ -83,7 +83,8 @@ func TestMCPConfigTokenEnvResolve(t *testing.T) {
 			"mcpServers": {
 				"remote": {
 					"url": "http://localhost:3000/mcp",
-					"token": "env://MCP_TEST_TOKEN"
+					"token": "env://MCP_TEST_TOKEN",
+					"httpTransportMode": "streamable"
 				}
 			}
 		}
@@ -96,6 +97,7 @@ func TestMCPConfigTokenEnvResolve(t *testing.T) {
 	remote := cfg.MCP.MCPServers["remote"]
 	require.NotNil(t, remote.Token)
 	assert.Equal(t, "resolved-token", remote.Token.String())
+	assert.Equal(t, "streamable", remote.HttpTransportMode)
 }
 
 func TestWebSearchConfigParsing(t *testing.T) {

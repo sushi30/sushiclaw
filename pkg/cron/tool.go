@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Ingenimax/agent-sdk-go/pkg/interfaces"
+	"github.com/sushi30/sushiclaw/pkg/bus"
 	"github.com/sushi30/sushiclaw/pkg/config"
 	"github.com/sushi30/sushiclaw/pkg/tools/toolctx"
 )
@@ -189,6 +190,18 @@ func (t *CronTool) addJob(ctx context.Context, params map[string]any) (string, e
 		Enabled:      true,
 		CreatedAt:    time.Now(),
 	}
+	if inboundCtx, ok := toolctx.InboundContextFromContext[bus.InboundContext](ctx); ok {
+		job.Context = inboundCtx
+	}
+	if job.Context.Channel == "" || job.Context.ChatID == "" {
+		job.Context = bus.NewOutboundContext(job.Channel, job.ChatID, "")
+	}
+	if job.Context.SenderID == "" {
+		job.Context.SenderID = job.SenderID
+	}
+	job.Channel = job.Context.Channel
+	job.ChatID = job.Context.ChatID
+	job.SenderID = job.Context.SenderID
 
 	if err := t.scheduler.AddJob(job); err != nil {
 		return "", err

@@ -246,11 +246,18 @@ func (s *Scheduler) executeJob(job Job) {
 
 	logger.InfoCF("cron", "Executing job", map[string]any{
 		"name":    current.Name,
-		"channel": current.Channel,
-		"chat_id": current.ChatID,
+		"channel": current.targetContext().Channel,
+		"chat_id": current.targetContext().ChatID,
 	})
 
 	ctx := context.Background()
+	target := current.targetContext()
+	if target.Channel == "" || target.ChatID == "" {
+		logger.WarnCF("cron", "Skipping cron job with missing routing context", map[string]any{
+			"job": current.Name,
+		})
+		return
+	}
 
 	if current.Command != "" {
 		s.executeCommandJob(ctx, *current)
@@ -266,20 +273,16 @@ func (s *Scheduler) executeJob(job Job) {
 }
 
 func (s *Scheduler) agentTurn(ctx context.Context, job Job) {
-	// Cron agent turns share the target chat's session (channel:chatID).
-	// If the session was evicted due to inactivity, getOrCreateSession
-	// lazily builds a fresh one, so the cron job always runs.
+	target := job.targetContext()
+	// Cron agent turns run in a dedicated per-job session so recurring jobs
+	// build their own relevant history instead of inheriting unrelated chat turns.
 	msg := bus.InboundMessage{
-		Context: bus.InboundContext{
-			Channel:  job.Channel,
-			ChatID:   job.ChatID,
-			SenderID: job.SenderID,
-		},
+		Context: target,
 		Sender: bus.SenderInfo{
-			CanonicalID: job.SenderID,
+			CanonicalID: target.SenderID,
 		},
 		Content:    job.Message,
-		SessionKey: job.Channel + ":" + job.ChatID,
+		SessionKey: cronSessionKey(job),
 	}
 	if err := s.bus.PublishInbound(ctx, msg); err != nil {
 		logger.ErrorCF("cron", "Failed to publish inbound cron job", map[string]any{
@@ -290,10 +293,11 @@ func (s *Scheduler) agentTurn(ctx context.Context, job Job) {
 }
 
 func (s *Scheduler) deliverMessage(ctx context.Context, job Job) {
+	target := job.targetContext()
 	msg := bus.OutboundMessage{
-		Channel: job.Channel,
-		ChatID:  job.ChatID,
-		Context: bus.NewOutboundContext(job.Channel, job.ChatID, ""),
+		Channel: target.Channel,
+		ChatID:  target.ChatID,
+		Context: target,
 		Content: job.Message,
 	}
 	msg = bus.MarkSystemOutboundMessage(msg)
@@ -328,11 +332,13 @@ func (s *Scheduler) executeCommandJob(ctx context.Context, job Job) {
 		content = fmt.Sprintf("Error: %v\nOutput: %s", err, output)
 	}
 
+	target := job.targetContext()
 	msg := bus.OutboundMessage{
-		Channel: job.Channel,
-		ChatID:  job.ChatID,
-		Context: bus.NewOutboundContext(job.Channel, job.ChatID, ""),
-		Content: content,
+		Channel:    target.Channel,
+		ChatID:     target.ChatID,
+		Context:    target,
+		Content:    content,
+		SessionKey: target.Channel + ":" + target.ChatID,
 	}
 	msg = bus.MarkSystemOutboundMessage(msg)
 	if err := s.bus.PublishOutbound(ctx, msg); err != nil {
@@ -341,4 +347,23 @@ func (s *Scheduler) executeCommandJob(ctx context.Context, job Job) {
 			"error": err.Error(),
 		})
 	}
+}
+
+func (j Job) targetContext() bus.InboundContext {
+	ctx := j.Context
+	if ctx.Channel == "" {
+		ctx.Channel = j.Channel
+	}
+	if ctx.ChatID == "" {
+		ctx.ChatID = j.ChatID
+	}
+	if ctx.SenderID == "" {
+		ctx.SenderID = j.SenderID
+	}
+	return bus.NormalizeInboundMessage(bus.InboundMessage{Context: ctx}).Context
+}
+
+func cronSessionKey(job Job) string {
+	target := job.targetContext()
+	return fmt.Sprintf("cron:%s:%s:%s", job.Name, target.Channel, target.ChatID)
 }

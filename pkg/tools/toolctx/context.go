@@ -5,6 +5,7 @@ import "context"
 type chatIDKey struct{}
 type channelKey struct{}
 type senderIDKey struct{}
+type inboundContextKey struct{}
 
 // WithChatID returns a context with the chat ID set.
 func WithChatID(ctx context.Context, chatID string) context.Context {
@@ -37,4 +38,19 @@ func WithSenderID(ctx context.Context, senderID string) context.Context {
 func SenderIDFromContext(ctx context.Context) string {
 	v, _ := ctx.Value(senderIDKey{}).(string)
 	return v
+}
+
+// WithInboundContext returns a context with the inbound message context set.
+func WithInboundContext(ctx context.Context, inboundCtx any) context.Context {
+	return context.WithValue(ctx, inboundContextKey{}, inboundCtx)
+}
+
+// InboundContextFromContext returns the inbound message context from the context, if any.
+func InboundContextFromContext[T any](ctx context.Context) (T, bool) {
+	v, ok := ctx.Value(inboundContextKey{}).(T)
+	var zero T
+	if !ok {
+		return zero, false
+	}
+	return v, true
 }

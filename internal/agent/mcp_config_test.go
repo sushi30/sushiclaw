@@ -25,9 +25,10 @@ func TestToAgentSDKMCPConfig(t *testing.T) {
 					AllowedTools: []string{"read_file"},
 				},
 				"http-server": {
-					URL:          "http://localhost:3000/mcp",
-					Token:        config.NewSecureString("bearer-token"),
-					AllowedTools: []string{"query"},
+					URL:               "http://localhost:3000/mcp",
+					Token:             config.NewSecureString("bearer-token"),
+					HttpTransportMode: "streamable",
+					AllowedTools:      []string{"query"},
 				},
 			},
 		}
@@ -48,6 +49,7 @@ func TestToAgentSDKMCPConfig(t *testing.T) {
 		assert.Equal(t, "", http.Command)
 		assert.Equal(t, "http://localhost:3000/mcp", http.URL)
 		assert.Equal(t, "bearer-token", http.Token)
+		assert.Equal(t, "streamable", http.HttpTransportMode)
 		assert.Equal(t, []string{"query"}, http.AllowedTools)
 	})
 

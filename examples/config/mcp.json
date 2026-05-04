@@ -13,7 +13,8 @@
     },
     "remote": {
       "url": "http://localhost:3000/mcp",
-      "token": "env://MCP_REMOTE_TOKEN"
+      "token": "env://MCP_REMOTE_TOKEN",
+      "httpTransportMode": "streamable"
     }
   }
 }

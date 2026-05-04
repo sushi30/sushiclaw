@@ -74,6 +74,7 @@ Remote MCP servers exposed over HTTP.
 {
   "url": "http://localhost:3000/mcp",
   "token": "env://MCP_REMOTE_TOKEN",
+  "httpTransportMode": "streamable",
   "allowedTools": ["query_database"]
 }
 ```
@@ -82,7 +83,10 @@ Remote MCP servers exposed over HTTP.
 |-------|------|-------------|
 | `url` | string | HTTP(S) endpoint of the MCP server |
 | `token` | string | Bearer token for authentication |
+| `httpTransportMode` | string | *(Optional)* HTTP MCP transport mode: `sse` or `streamable` |
 | `allowedTools` | string[] | *(Optional)* Whitelist tools from this server |
+
+If `httpTransportMode` is omitted, the underlying SDK keeps its current default behavior. Use `"streamable"` for hosted MCP endpoints that require Streamable HTTP.
 
 ## Environment Variables
 
@@ -132,6 +136,7 @@ See [`examples/config/mcp.json`](../examples/config/mcp.json) for a complete exa
 **Tools from MCP server are not available**
 - Ensure the server process starts successfully (stdio servers).
 - Verify the HTTP endpoint is reachable.
+- For hosted HTTP MCP endpoints, verify `httpTransportMode` matches the server expectation (`streamable` vs `sse`).
 - Check `allowedTools` is not accidentally filtering out the tool you need.
 
 **Secrets exposed in logs**

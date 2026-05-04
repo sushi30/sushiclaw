@@ -40,12 +40,13 @@ type MCPConfig struct {
 
 // MCPServerConfig represents a single MCP server configuration.
 type MCPServerConfig struct {
-	Command      string            `json:"command,omitempty"`
-	Args         []string          `json:"args,omitempty"`
-	Env          map[string]string `json:"env,omitempty"`
-	URL          string            `json:"url,omitempty"`
-	Token        *SecureString     `json:"token,omitzero"`
-	AllowedTools []string          `json:"allowedTools,omitempty"`
+	Command           string            `json:"command,omitempty"`
+	Args              []string          `json:"args,omitempty"`
+	Env               map[string]string `json:"env,omitempty"`
+	URL               string            `json:"url,omitempty"`
+	Token             *SecureString     `json:"token,omitzero"`
+	HttpTransportMode string            `json:"httpTransportMode,omitempty"`
+	AllowedTools      []string          `json:"allowedTools,omitempty"`
 }
 
 type AgentsConfig struct {

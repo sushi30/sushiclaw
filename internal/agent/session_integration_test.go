@@ -274,14 +274,14 @@ func TestClearHistoryDeletesSessionLineage(t *testing.T) {
 
 	reopenedStable, err := NewSQLiteSessionMemory(ctx, dbPath, "telegram:chat1")
 	require.NoError(t, err)
-	defer reopenedStable.Close()
+	defer func() { _ = reopenedStable.Close() }()
 	msgs, err := reopenedStable.GetMessages(ctx)
 	require.NoError(t, err)
 	assert.Empty(t, msgs)
 
 	reopenedSummary, err := NewSQLiteSessionMemory(ctx, dbPath, "telegram:chat1#summary-1")
 	require.NoError(t, err)
-	defer reopenedSummary.Close()
+	defer func() { _ = reopenedSummary.Close() }()
 	msgs, err = reopenedSummary.GetMessages(ctx)
 	require.NoError(t, err)
 	assert.Empty(t, msgs)

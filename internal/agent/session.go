@@ -148,7 +148,11 @@ func buildAgentWithMemory(cfg *config.Config, tools []interfaces.Tool, mem inter
 }
 
 func buildSummaryAgent(cfg *config.Config) (agentRunner, error) {
-	return buildAgentWithMemory(cfg, nil, NewInMemoryMemory())
+	summaryCfg := *cfg
+	if summaryCfg.Agents.Defaults.Summary.Model != "" {
+		summaryCfg.Agents.Defaults.ModelName = summaryCfg.Agents.Defaults.Summary.Model
+	}
+	return buildAgentWithMemory(&summaryCfg, nil, NewInMemoryMemory())
 }
 
 // toAgentSDKMCPConfig converts sushiclaw MCPConfig to agent-sdk-go MCPConfiguration.
@@ -593,8 +597,31 @@ func (s *Session) handleInbound(ctx context.Context, msg bus.InboundMessage, ses
 	start := time.Now()
 	s.mgr.emitProgress(ctx, ProgressEvent{Channel: msg.Channel, ChatID: chatID, Kind: ProgressTurnStarted})
 
+	if s.shouldSummarizeBeforeTurn(input) {
+		response, err := s.handoffToSummarySession(actx, msg.Channel, chatID, input)
+		if err == nil {
+			if response != "" && s.mgr.bus != nil {
+				_ = s.mgr.bus.PublishOutbound(ctx, bus.OutboundMessage{
+					Channel:    msg.Channel,
+					ChatID:     chatID,
+					SessionKey: sessionKey,
+					Content:    response,
+				})
+			}
+			s.mgr.emitProgress(ctx, ProgressEvent{Channel: msg.Channel, ChatID: chatID, Kind: ProgressCompleted, Elapsed: time.Since(start)})
+			s.mgr.emitSummary(ctx, ProgressSummary{
+				Channel:       msg.Channel,
+				ChatID:        chatID,
+				Success:       true,
+				Duration:      time.Since(start),
+				ResponseBytes: len(response),
+			})
+			return
+		}
+	}
+
 	response, usage, toolCalls, err := s.runDetailedTurn(actx, input)
-	if err != nil && isContextOverflowError(err) {
+	if err != nil && s.mgr != nil && s.mgr.cfg != nil && s.mgr.cfg.Agents.Defaults.Summary.Enabled && isContextOverflowError(err) {
 		response, err = s.handoffToSummarySession(actx, msg.Channel, chatID, input)
 		usage = nil
 		toolCalls = 0
@@ -982,7 +1009,21 @@ func firstInt(m map[string]interface{}, keys ...string) (int, bool) {
 	return 0, false
 }
 
+func (s *Session) shouldSummarizeBeforeTurn(input string) bool {
+	if s == nil || s.mgr == nil || s.mgr.cfg == nil {
+		return false
+	}
+	summaryCfg := s.mgr.cfg.Agents.Defaults.Summary
+	if !summaryCfg.Enabled || summaryCfg.TokenTrigger <= 0 {
+		return false
+	}
+	return approximateTokenCount(input)+approximateSessionTokens(s) >= summaryCfg.TokenTrigger
+}
+
 func (s *Session) handoffToSummarySession(ctx context.Context, channel, chatID, input string) (string, error) {
+	if s == nil || s.mgr == nil || s.mgr.cfg == nil || !s.mgr.cfg.Agents.Defaults.Summary.Enabled {
+		return "", errors.New("session summarization is disabled")
+	}
 	messages, err := s.mem.GetMessages(ctx)
 	if err != nil {
 		return "", fmt.Errorf("load session history: %w", err)
@@ -1042,6 +1083,17 @@ func (s *Session) handoffToSummarySession(ctx context.Context, channel, chatID, 
 }
 
 func (s *Session) generateSummary(ctx context.Context, transcript string) (string, error) {
+	return s.generateSummaryWithDepth(ctx, transcript, 0)
+}
+
+func (s *Session) generateSummaryWithDepth(ctx context.Context, transcript string, depth int) (string, error) {
+	if strings.TrimSpace(transcript) == "" {
+		return "", errors.New("generate summary: empty transcript")
+	}
+	if depth > 4 {
+		return "", errors.New("generate summary: exceeded chunking depth")
+	}
+
 	factory := s.mgr.summaryFactory
 	if factory == nil {
 		factory = func() (agentRunner, error) { return buildSummaryAgent(s.mgr.cfg) }
@@ -1051,13 +1103,13 @@ func (s *Session) generateSummary(ctx context.Context, transcript string) (strin
 		return "", fmt.Errorf("build summary agent: %w", err)
 	}
 
-	prompt := "Summarize this prior conversation for future turns.\n" +
-		"Preserve user goals, decisions, constraints, facts, unfinished work, and explicit preferences.\n" +
-		"Do not preserve temporary skill instructions.\n" +
-		"Keep it concise and structured.\n\nConversation:\n" + transcript
+	prompt := structuredSummaryPrompt(transcript)
 
 	summary, err := summarizer.Run(ctx, prompt)
 	if err != nil {
+		if isContextOverflowError(err) {
+			return s.chunkedSummary(ctx, transcript, depth+1)
+		}
 		return "", fmt.Errorf("generate summary: %w", err)
 	}
 	summary = strings.TrimSpace(summary)
@@ -1065,6 +1117,24 @@ func (s *Session) generateSummary(ctx context.Context, transcript string) (strin
 		return "", errors.New("generate summary: empty response")
 	}
 	return summary, nil
+}
+
+func (s *Session) chunkedSummary(ctx context.Context, transcript string, depth int) (string, error) {
+	chunks := splitTranscriptForSummary(transcript)
+	if len(chunks) <= 1 {
+		return "", errors.New("generate summary: transcript still too large after chunking")
+	}
+
+	partials := make([]string, 0, len(chunks))
+	for i, chunk := range chunks {
+		partial, err := s.generateSummaryWithDepth(ctx, chunk, depth)
+		if err != nil {
+			return "", err
+		}
+		partials = append(partials, fmt.Sprintf("Chunk %d summary:\n%s", i+1, partial))
+	}
+
+	return s.generateSummaryWithDepth(ctx, strings.Join(partials, "\n\n"), depth)
 }
 
 func buildSummaryInput(messages []interfaces.Message) string {
@@ -1085,6 +1155,17 @@ func buildSummaryInput(messages []interfaces.Message) string {
 	return strings.TrimSpace(sb.String())
 }
 
+func structuredSummaryPrompt(transcript string) string {
+	return "Summarize this prior conversation for future turns.\n" +
+		"Return a compact structured summary with exactly these markdown headings:\n" +
+		"## Goals\n## Key Facts\n## Decisions\n## Preferences\n## Open Threads\n## Resources\n" +
+		"Rules:\n" +
+		"- Preserve user goals, decisions, constraints, explicit preferences, and unresolved tasks.\n" +
+		"- Do not preserve temporary skill instructions or internal orchestration details.\n" +
+		"- Keep each section concise and omit empty bullets when there is nothing to report.\n\n" +
+		"Conversation:\n" + transcript
+}
+
 func isContextOverflowError(err error) bool {
 	if err == nil {
 		return false
@@ -1097,6 +1178,53 @@ func isContextOverflowError(err error) bool {
 
 func nextSummarySessionKey(stableKey string) string {
 	return fmt.Sprintf("%s#summary-%d", stableKey, time.Now().UnixNano())
+}
+
+func approximateSessionTokens(s *Session) int {
+	msgs, err := s.mem.GetMessages(context.Background())
+	if err != nil {
+		return 0
+	}
+	total := 0
+	for _, msg := range msgs {
+		total += approximateTokenCount(msg.Content)
+	}
+	return total
+}
+
+func approximateTokenCount(text string) int {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return 0
+	}
+	return max(1, len([]rune(text))/4)
+}
+
+func splitTranscriptForSummary(transcript string) []string {
+	parts := strings.Split(transcript, "\n\n")
+	if len(parts) <= 1 {
+		runes := []rune(transcript)
+		if len(runes) < 2 {
+			return []string{transcript}
+		}
+		mid := len(runes) / 2
+		return []string{string(runes[:mid]), string(runes[mid:])}
+	}
+
+	mid := len(parts) / 2
+	left := strings.TrimSpace(strings.Join(parts[:mid], "\n\n"))
+	right := strings.TrimSpace(strings.Join(parts[mid:], "\n\n"))
+	var chunks []string
+	if left != "" {
+		chunks = append(chunks, left)
+	}
+	if right != "" {
+		chunks = append(chunks, right)
+	}
+	if len(chunks) == 0 {
+		return []string{transcript}
+	}
+	return chunks
 }
 
 // transcribeAudioInMessage resolves audio media refs, transcribes them, and

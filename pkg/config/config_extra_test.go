@@ -134,8 +134,8 @@ func TestLoadConfig_ValidFile(t *testing.T) {
 	cfgPath := filepath.Join(tmpDir, "config.json")
 	data := []byte(`{
 		"version": 2,
-		"agents": {"defaults": {"model_name": "test-model", "workspace": "/tmp", "restrict_to_workspace": false, "max_tokens": 1000, "temperature": 0.5, "max_tool_iterations": 5}},
-		"model_list": [{"model_name": "test-model", "model": "gpt-4", "api_key": "test-key"}],
+		"agents": {"defaults": {"model_name": "test-model", "workspace": "/tmp", "restrict_to_workspace": false, "max_tokens": 1000, "temperature": 0.5, "max_tool_iterations": 5, "summary": {"enabled": true, "token_trigger": 32000, "model": "summary-model"}}},
+		"model_list": [{"model_name": "test-model", "model": "gpt-4", "api_key": "test-key"}, {"model_name": "summary-model", "model": "gpt-4o-mini", "api_key": "test-key"}],
 		"channels": {"telegram": {"enabled": true, "type": "telegram", "token": "bot-token"}},
 		"gateway": {"host": "0.0.0.0", "port": 8080, "log_level": "info"},
 		"tools": {"media_cleanup": {"enabled": true, "max_age": 60, "interval": 10}, "exec": {"enabled": false}}
@@ -147,6 +147,9 @@ func TestLoadConfig_ValidFile(t *testing.T) {
 	assert.Equal(t, 2, cfg.Version)
 	assert.Equal(t, "test-model", cfg.Agents.Defaults.ModelName)
 	assert.Equal(t, 5, cfg.Agents.Defaults.MaxToolIterations)
+	assert.True(t, cfg.Agents.Defaults.Summary.Enabled)
+	assert.Equal(t, 32000, cfg.Agents.Defaults.Summary.TokenTrigger)
+	assert.Equal(t, "summary-model", cfg.Agents.Defaults.Summary.Model)
 	assert.Equal(t, 8080, cfg.Gateway.Port)
 	assert.NotNil(t, cfg.Channels["telegram"])
 	assert.Equal(t, "telegram", cfg.Channels["telegram"].Name())

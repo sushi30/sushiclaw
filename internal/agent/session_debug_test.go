@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -25,9 +26,13 @@ type mockRunner struct {
 	detailedErr error
 	runResult   string
 	runErr      error
+	runFunc     func(string) (string, error)
 }
 
-func (m *mockRunner) Run(context.Context, string) (string, error) {
+func (m *mockRunner) Run(_ context.Context, input string) (string, error) {
+	if m.runFunc != nil {
+		return m.runFunc(input)
+	}
 	if m.runErr != nil {
 		return "", m.runErr
 	}
@@ -487,10 +492,21 @@ func TestSessionManagerContextOverflowCreatesNewSummarySession(t *testing.T) {
 	ctx := t.Context()
 	extBus := bus.NewMessageBus()
 	cfg := &config.Config{
-		Agents: config.AgentsConfig{Defaults: config.AgentDefaults{ModelName: "test-model"}},
+		Agents: config.AgentsConfig{Defaults: config.AgentDefaults{
+			ModelName: "test-model",
+			Summary: config.SummaryConfig{
+				Enabled:      true,
+				TokenTrigger: 1024,
+				Model:        "summary-model",
+			},
+		}},
 		ModelList: []config.ModelConfig{{
 			ModelName: "test-model",
 			Model:     "gpt-4o",
+			APIKey:    config.NewSecureString("test-key"),
+		}, {
+			ModelName: "summary-model",
+			Model:     "gpt-4o-mini",
 			APIKey:    config.NewSecureString("test-key"),
 		}},
 		Sessions: config.SessionsConfig{Directory: t.TempDir()},
@@ -556,6 +572,60 @@ func TestSessionManagerContextOverflowCreatesNewSummarySession(t *testing.T) {
 	assert.Equal(t, interfaces.MessageRoleAssistant, msgs[0].Role)
 	assert.Contains(t, msgs[0].Content, "Compact summary")
 	assert.Empty(t, session.activatedSkills)
+}
+
+func TestSessionManagerOverflowDoesNotSummarizeWhenDisabled(t *testing.T) {
+	overflowErr := errors.New("maximum context length exceeded")
+	extBus := bus.NewMessageBus()
+	sm := &SessionManager{bus: extBus, cfg: &config.Config{}, progress: &collectingProgress{}}
+	session := &Session{agent: &mockRunner{runErr: overflowErr}, mgr: sm, stableKey: "telegram:chat1"}
+
+	turnCtx, turnSeq, turnDone := session.startTurn(t.Context())
+	session.handleInbound(turnCtx, inbound("telegram", "chat1", "bad"), "telegram:chat1", turnSeq, turnDone)
+
+	msg := requireOutboundMessage(t, extBus)
+	assert.Contains(t, msg.Content, "Error: maximum context length exceeded")
+	assertNoOutboundMessage(t, extBus)
+}
+
+func TestGenerateSummaryFallsBackToChunkedReduction(t *testing.T) {
+	ctx := t.Context()
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{Defaults: config.AgentDefaults{
+			ModelName: "test-model",
+			Summary:   config.SummaryConfig{Enabled: true, Model: "summary-model"},
+		}},
+		ModelList: []config.ModelConfig{{
+			ModelName: "test-model",
+			Model:     "gpt-4o",
+			APIKey:    config.NewSecureString("test-key"),
+		}, {
+			ModelName: "summary-model",
+			Model:     "gpt-4o-mini",
+			APIKey:    config.NewSecureString("test-key"),
+		}},
+	}
+
+	sm := &SessionManager{
+		cfg: cfg,
+		summaryFactory: func() (agentRunner, error) {
+			return &mockRunner{runFunc: func(input string) (string, error) {
+				if strings.Contains(input, "Conversation:\nuser: one") && strings.Contains(input, "assistant: two") {
+					return "", errors.New("maximum context length exceeded")
+				}
+				if strings.Contains(input, "Chunk 1 summary:") {
+					return "## Goals\n- combined\n## Key Facts\n- merged\n## Decisions\n- none\n## Preferences\n- none\n## Open Threads\n- follow up\n## Resources\n- none", nil
+				}
+				return "## Goals\n- part\n## Key Facts\n- item\n## Decisions\n- none\n## Preferences\n- none\n## Open Threads\n- none\n## Resources\n- none", nil
+			}}, nil
+		},
+	}
+	session := &Session{mgr: sm}
+
+	summary, err := session.generateSummary(ctx, "user: one\n\nassistant: two")
+	require.NoError(t, err)
+	assert.Contains(t, summary, "## Goals")
+	assert.Contains(t, summary, "combined")
 }
 
 func streamEvents(events ...interfaces.AgentStreamEvent) <-chan interfaces.AgentStreamEvent {

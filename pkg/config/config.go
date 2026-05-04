@@ -55,12 +55,19 @@ type AgentsConfig struct {
 }
 
 type AgentDefaults struct {
-	ModelName           string  `json:"model_name"`
-	Workspace           string  `json:"workspace"`
-	RestrictToWorkspace bool    `json:"restrict_to_workspace"`
-	MaxTokens           int     `json:"max_tokens"`
-	Temperature         float64 `json:"temperature"`
-	MaxToolIterations   int     `json:"max_tool_iterations"`
+	ModelName           string        `json:"model_name"`
+	Workspace           string        `json:"workspace"`
+	RestrictToWorkspace bool          `json:"restrict_to_workspace"`
+	MaxTokens           int           `json:"max_tokens"`
+	Temperature         float64       `json:"temperature"`
+	MaxToolIterations   int           `json:"max_tool_iterations"`
+	Summary             SummaryConfig `json:"summary,omitempty"`
+}
+
+type SummaryConfig struct {
+	Enabled      bool   `json:"enabled"`
+	TokenTrigger int    `json:"token_trigger,omitempty"`
+	Model        string `json:"model,omitempty"`
 }
 
 type ModelConfig struct {

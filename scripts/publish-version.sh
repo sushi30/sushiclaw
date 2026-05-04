@@ -56,7 +56,9 @@ tag_exists() {
 	esac
 }
 
-git fetch --tags --prune-tags origin
+# Update the remote tracking branch without fetching tags.
+# Tag validation below queries local refs and origin directly.
+git fetch --no-tags origin main
 
 prefix="$(date -u +%Y.%m)"
 remote_head="$(git rev-parse --short=8 origin/main)"

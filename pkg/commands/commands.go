@@ -68,6 +68,7 @@ type Runtime struct {
 	ListSkills      func() []SkillInfo
 	ListCronJobs    func() (string, error)
 	ClearHistory    func(req Request) error
+	StopTurn        func(sessionKey string) bool
 	SetDebug        func(ctx context.Context, channel, chatID, mode string) string
 	ActivateSkill   func(req Request, skillName string) error
 }
@@ -258,6 +259,7 @@ func BuiltinDefinitions() []Definition {
 		{Name: "start", Description: "Start the bot", Handler: startHandler},
 		{Name: "help", Description: "Show this help message", Handler: helpHandler},
 		{Name: "clear", Description: "Clear conversation history", Handler: clearHandler},
+		{Name: "stop", Description: "Stop the current turn", Handler: stopHandler},
 		{Name: "debug", Description: "Toggle debug event forwarding", Handler: debugHandler, Usage: "/debug [on|off]"},
 		{Name: "model", Description: "Show or switch model", Handler: modelHandler},
 		{Name: "show", Description: "Show current configuration"},
@@ -359,6 +361,13 @@ func clearHandler(_ context.Context, req Request, rt *Runtime) error {
 		}
 	}
 	return req.Reply("History cleared.")
+}
+
+func stopHandler(_ context.Context, req Request, rt *Runtime) error {
+	if rt != nil && rt.StopTurn != nil && rt.StopTurn(req.SessionKey) {
+		return req.Reply("Stopped current turn.")
+	}
+	return req.Reply("No active turn.")
 }
 
 func modelHandler(_ context.Context, req Request, rt *Runtime) error {

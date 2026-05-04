@@ -44,12 +44,15 @@ type SessionManager struct {
 
 // Session represents a single isolated conversation context.
 type Session struct {
-	agent           agentRunner
-	mem             interfaces.Memory
-	activatedSkills map[string]bool
-	lastUsed        time.Time
-	mu              sync.RWMutex
-	mgr             *SessionManager
+	agent            agentRunner
+	mem              interfaces.Memory
+	activatedSkills  map[string]bool
+	activeTurnCancel context.CancelFunc
+	activeTurnDone   chan struct{}
+	activeTurnSeq    uint64
+	lastUsed         time.Time
+	mu               sync.RWMutex
+	mgr              *SessionManager
 }
 
 type agentRunner interface {
@@ -205,6 +208,7 @@ func (sm *SessionManager) Stop() {
 	stop := sm.cleanupStop
 	sm.cleanupStop = nil
 	for key, s := range sm.sessions {
+		s.stopTurn()
 		closeSessionMemory(s.mem)
 		delete(sm.sessions, key)
 	}
@@ -286,6 +290,7 @@ func (sm *SessionManager) ClearHistory(sessionKey string) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	if s, ok := sm.sessions[sessionKey]; ok {
+		s.stopTurn()
 		if err := s.mem.Clear(context.Background()); err != nil {
 			return err
 		}
@@ -451,7 +456,8 @@ func (sm *SessionManager) Dispatch(ctx context.Context, msg bus.InboundMessage) 
 		}
 		return
 	}
-	s.handleInbound(ctx, msg, key)
+	turnCtx, turnSeq, turnDone := s.startTurn(ctx)
+	s.handleInbound(turnCtx, msg, key, turnSeq, turnDone)
 }
 
 func computeSessionKey(msg bus.InboundMessage) string {
@@ -461,12 +467,17 @@ func computeSessionKey(msg bus.InboundMessage) string {
 	return msg.Channel + ":" + msg.ChatID
 }
 
-func (s *Session) handleInbound(ctx context.Context, msg bus.InboundMessage, sessionKey string) {
+func (s *Session) handleInbound(ctx context.Context, msg bus.InboundMessage, sessionKey string, turnSeq uint64, turnDone chan struct{}) {
+	defer s.finishTurn(turnSeq, turnDone)
+
 	chatID := msg.ChatID
 
 	// Transcribe audio before processing.
 	msg, hadAudio, err := s.mgr.transcribeAudioInMessage(ctx, msg)
 	if err != nil {
+		if s.turnCanceled(ctx, turnSeq, err) {
+			return
+		}
 		logger.WarnCF("agent", "Transcription failed", map[string]any{"error": err.Error()})
 		if s.mgr.bus != nil {
 			_ = s.mgr.bus.PublishOutbound(ctx, bus.MarkSystemOutboundMessage(bus.OutboundMessage{
@@ -479,6 +490,9 @@ func (s *Session) handleInbound(ctx context.Context, msg bus.InboundMessage, ses
 		return
 	}
 	if hadAudio && msg.Content == "" {
+		if s.turnCanceled(ctx, turnSeq, nil) {
+			return
+		}
 		if s.mgr.bus != nil {
 			_ = s.mgr.bus.PublishOutbound(ctx, bus.MarkSystemOutboundMessage(bus.OutboundMessage{
 				Channel:    msg.Channel,
@@ -528,6 +542,9 @@ func (s *Session) handleInbound(ctx context.Context, msg bus.InboundMessage, ses
 	elapsed := time.Since(start)
 	responseBytes := len(response)
 	if err != nil {
+		if s.turnCanceled(ctx, turnSeq, err) {
+			return
+		}
 		logger.ErrorCF("agent", "Agent run failed", map[string]any{"error": err.Error()})
 		s.logTurnSummary(msg.Channel, chatID, elapsed, usage, toolCalls, responseBytes, err)
 		if s.mgr.bus != nil {
@@ -552,6 +569,9 @@ func (s *Session) handleInbound(ctx context.Context, msg bus.InboundMessage, ses
 		return
 	}
 
+	if s.turnCanceled(ctx, turnSeq, nil) {
+		return
+	}
 	if response != "" {
 		if s.mgr.bus != nil {
 			_ = s.mgr.bus.PublishOutbound(ctx, bus.OutboundMessage{
@@ -573,6 +593,78 @@ func (s *Session) handleInbound(ctx context.Context, msg bus.InboundMessage, ses
 		Duration:      elapsed,
 		ResponseBytes: responseBytes,
 	})
+}
+
+func (s *Session) startTurn(parent context.Context) (context.Context, uint64, chan struct{}) {
+	turnCtx, cancel := context.WithCancel(parent)
+	done := make(chan struct{})
+
+	s.mu.Lock()
+	prevCancel := s.activeTurnCancel
+	s.activeTurnSeq++
+	turnSeq := s.activeTurnSeq
+	s.activeTurnCancel = cancel
+	s.activeTurnDone = done
+	s.lastUsed = time.Now()
+	s.mu.Unlock()
+
+	if prevCancel != nil {
+		prevCancel()
+	}
+
+	return turnCtx, turnSeq, done
+}
+
+func (s *Session) finishTurn(turnSeq uint64, turnDone chan struct{}) {
+	if turnDone != nil {
+		close(turnDone)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.activeTurnSeq != turnSeq {
+		return
+	}
+	s.activeTurnCancel = nil
+	s.activeTurnDone = nil
+}
+
+func (s *Session) isCurrentTurn(turnSeq uint64) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.activeTurnSeq == turnSeq
+}
+
+func (s *Session) stopTurn() bool {
+	s.mu.RLock()
+	cancel := s.activeTurnCancel
+	s.mu.RUnlock()
+	if cancel == nil {
+		return false
+	}
+	cancel()
+	return true
+}
+
+func (sm *SessionManager) StopTurn(sessionKey string) bool {
+	sm.mu.RLock()
+	s := sm.sessions[sessionKey]
+	sm.mu.RUnlock()
+	if s == nil {
+		return false
+	}
+	return s.stopTurn()
+}
+
+func (s *Session) turnCanceled(ctx context.Context, turnSeq uint64, err error) bool {
+	if isExpectedCancellation(err) || ctx.Err() != nil || !s.isCurrentTurn(turnSeq) {
+		return true
+	}
+	return false
+}
+
+func isExpectedCancellation(err error) bool {
+	return errors.Is(err, context.Canceled)
 }
 
 func (s *Session) runStreamingTurn(

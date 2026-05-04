@@ -100,7 +100,8 @@ func TestSessionManagerDebugStartCompletionAndSummary(t *testing.T) {
 		mgr: sm,
 	}
 
-	session.handleInbound(t.Context(), inbound("telegram", "chat1", "hi"), "telegram:chat1")
+	turnCtx, turnSeq, turnDone := session.startTurn(t.Context())
+	session.handleInbound(turnCtx, inbound("telegram", "chat1", "hi"), "telegram:chat1", turnSeq, turnDone)
 
 	msg := requireOutboundMessage(t, extBus)
 	assert.Equal(t, "hello", msg.Content)
@@ -206,7 +207,8 @@ func TestSessionManagerRunErrorPublishesOneUserErrorAndFailureSummary(t *testing
 	sm := &SessionManager{bus: extBus, progress: progress}
 	session := &Session{agent: &mockRunner{detailedErr: runErr}, mgr: sm}
 
-	session.handleInbound(t.Context(), inbound("telegram", "chat1", "bad"), "telegram:chat1")
+	turnCtx, turnSeq, turnDone := session.startTurn(t.Context())
+	session.handleInbound(turnCtx, inbound("telegram", "chat1", "bad"), "telegram:chat1", turnSeq, turnDone)
 
 	msg := requireOutboundMessage(t, extBus)
 	assert.Equal(t, bus.MessageKindSystem, msg.Context.Raw["message_kind"])
@@ -248,7 +250,8 @@ func TestSessionManagerTurnSummaryLogsUsageAndDuration(t *testing.T) {
 		mgr: sm,
 	}
 
-	session.handleInbound(t.Context(), inbound("telegram", "chat1", "hi"), "telegram:chat1")
+	turnCtx, turnSeq, turnDone := session.startTurn(t.Context())
+	session.handleInbound(turnCtx, inbound("telegram", "chat1", "hi"), "telegram:chat1", turnSeq, turnDone)
 
 	data, err := os.ReadFile(logFile)
 	require.NoError(t, err)
@@ -287,6 +290,196 @@ func TestSessionManagerStreamingStartupFallbackUsesDetailedUsage(t *testing.T) {
 	assert.Equal(t, 2, toolCalls)
 	require.NotNil(t, usage)
 	assert.Equal(t, 15, usage.TotalTokens)
+}
+
+func TestSessionManagerStopTurnCancelsActiveWorkAndAllowsNextTurn(t *testing.T) {
+	extBus := bus.NewMessageBus()
+	progress := &collectingProgress{}
+	sm := &SessionManager{
+		bus:      extBus,
+		progress: progress,
+		sessions: map[string]*Session{},
+	}
+
+	started := make(chan struct{}, 1)
+	session := &Session{
+		agent: &scriptedRunner{
+			run: func(ctx context.Context, input string) (string, error) {
+				switch input {
+				case "first":
+					started <- struct{}{}
+					<-ctx.Done()
+					return "", ctx.Err()
+				case "second":
+					return "second reply", nil
+				default:
+					return "", errors.New("unexpected input")
+				}
+			},
+		},
+		mgr: sm,
+	}
+	sm.sessions["telegram:chat1"] = session
+
+	go sm.Dispatch(t.Context(), inbound("telegram", "chat1", "first"))
+	<-started
+
+	assert.True(t, sm.StopTurn("telegram:chat1"))
+	assertNoOutboundMessage(t, extBus)
+	assertNotHasEvent(t, progress.events, ProgressFailed)
+
+	sm.Dispatch(t.Context(), inbound("telegram", "chat1", "second"))
+
+	msg := requireOutboundMessage(t, extBus)
+	assert.Equal(t, "second reply", msg.Content)
+	assert.Equal(t, "telegram:chat1", msg.SessionKey)
+}
+
+func TestSessionManagerSecondInboundCancelsFirstAndPublishesOnlySecond(t *testing.T) {
+	extBus := bus.NewMessageBus()
+	progress := &collectingProgress{}
+	sm := &SessionManager{
+		bus:      extBus,
+		progress: progress,
+		sessions: map[string]*Session{},
+	}
+
+	firstStarted := make(chan struct{}, 1)
+	firstRelease := make(chan struct{})
+	session := &Session{
+		agent: &scriptedRunner{
+			run: func(ctx context.Context, input string) (string, error) {
+				switch input {
+				case "first":
+					firstStarted <- struct{}{}
+					<-firstRelease
+					return "stale first reply", nil
+				case "second":
+					return "second reply", nil
+				default:
+					return "", errors.New("unexpected input")
+				}
+			},
+		},
+		mgr: sm,
+	}
+	sm.sessions["telegram:chat1"] = session
+
+	go sm.Dispatch(t.Context(), inbound("telegram", "chat1", "first"))
+	<-firstStarted
+
+	sm.Dispatch(t.Context(), inbound("telegram", "chat1", "second"))
+	close(firstRelease)
+
+	msg := requireOutboundMessage(t, extBus)
+	assert.Equal(t, "second reply", msg.Content)
+	assertNoOutboundMessage(t, extBus)
+	assertNotHasEvent(t, progress.events, ProgressFailed)
+}
+
+func TestSessionManagerCanceledTurnSuppressesContextCanceledReply(t *testing.T) {
+	extBus := bus.NewMessageBus()
+	progress := &collectingProgress{}
+	sm := &SessionManager{
+		bus:      extBus,
+		progress: progress,
+		sessions: map[string]*Session{},
+	}
+
+	started := make(chan struct{}, 1)
+	session := &Session{
+		agent: &scriptedRunner{
+			run: func(ctx context.Context, input string) (string, error) {
+				started <- struct{}{}
+				<-ctx.Done()
+				return "", ctx.Err()
+			},
+		},
+		mgr: sm,
+	}
+	sm.sessions["telegram:chat1"] = session
+
+	go sm.Dispatch(t.Context(), inbound("telegram", "chat1", "first"))
+	<-started
+	assert.True(t, sm.StopTurn("telegram:chat1"))
+
+	assertNoOutboundMessage(t, extBus)
+	assertNotHasEvent(t, progress.events, ProgressFailed)
+}
+
+func TestSessionManagerStaleCanceledTurnCompletionIsIgnored(t *testing.T) {
+	extBus := bus.NewMessageBus()
+	progress := &collectingProgress{}
+	sm := &SessionManager{
+		bus:      extBus,
+		progress: progress,
+		sessions: map[string]*Session{},
+	}
+
+	firstStarted := make(chan struct{}, 1)
+	firstRelease := make(chan struct{})
+	session := &Session{
+		agent: &scriptedRunner{
+			run: func(ctx context.Context, input string) (string, error) {
+				switch input {
+				case "first":
+					firstStarted <- struct{}{}
+					<-firstRelease
+					return "stale first reply", nil
+				case "second":
+					return "fresh second reply", nil
+				default:
+					return "", errors.New("unexpected input")
+				}
+			},
+		},
+		mgr: sm,
+	}
+	sm.sessions["telegram:chat1"] = session
+
+	go sm.Dispatch(t.Context(), inbound("telegram", "chat1", "first"))
+	<-firstStarted
+
+	sm.Dispatch(t.Context(), inbound("telegram", "chat1", "second"))
+	close(firstRelease)
+
+	msg := requireOutboundMessage(t, extBus)
+	assert.Equal(t, "fresh second reply", msg.Content)
+	assertNoOutboundMessage(t, extBus)
+}
+
+type scriptedRunner struct {
+	run         func(context.Context, string) (string, error)
+	runDetailed func(context.Context, string) (*interfaces.AgentResponse, error)
+	runStream   func(context.Context, string) (<-chan interfaces.AgentStreamEvent, error)
+}
+
+func (s *scriptedRunner) Run(ctx context.Context, input string) (string, error) {
+	if s.run == nil {
+		return "", errors.New("Run should not be called")
+	}
+	return s.run(ctx, input)
+}
+
+func (s *scriptedRunner) RunDetailed(ctx context.Context, input string) (*interfaces.AgentResponse, error) {
+	if s.runDetailed != nil {
+		return s.runDetailed(ctx, input)
+	}
+	if s.run != nil {
+		content, err := s.run(ctx, input)
+		if err != nil {
+			return nil, err
+		}
+		return &interfaces.AgentResponse{Content: content}, nil
+	}
+	return nil, errors.New("RunDetailed should not be called")
+}
+
+func (s *scriptedRunner) RunStream(ctx context.Context, input string) (<-chan interfaces.AgentStreamEvent, error) {
+	if s.runStream == nil {
+		return nil, errors.New("RunStream should not be called")
+	}
+	return s.runStream(ctx, input)
 }
 
 func streamEvents(events ...interfaces.AgentStreamEvent) <-chan interfaces.AgentStreamEvent {
@@ -338,4 +531,13 @@ func assertHasEvent(t *testing.T, events []ProgressEvent, kind ProgressKind) {
 		}
 	}
 	t.Fatalf("expected event kind %s in %#v", kind, events)
+}
+
+func assertNotHasEvent(t *testing.T, events []ProgressEvent, kind ProgressKind) {
+	t.Helper()
+	for _, event := range events {
+		if event.Kind == kind {
+			t.Fatalf("unexpected event kind %s in %#v", kind, events)
+		}
+	}
 }

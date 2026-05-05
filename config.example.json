@@ -137,7 +137,8 @@
     "cron": {
       "enabled": true,
       "allow_command": true,
-      "exec_timeout_minutes": 5
+      "exec_timeout_minutes": 5,
+      "timezone": "Europe/Amsterdam"
     },
     "vision": {
       "enabled": true,

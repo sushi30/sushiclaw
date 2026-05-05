@@ -153,6 +153,9 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 	if sessionMgr != nil {
 		sessionMgr.Start()
 		defer sessionMgr.Stop()
+		if cronScheduler != nil {
+			cronScheduler.SetAgentRunner(sessionMgr)
+		}
 	}
 
 	if sessionMgr != nil {

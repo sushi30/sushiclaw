@@ -33,7 +33,7 @@ func (t *CronTool) Name() string { return "cron" }
 
 // Description returns the tool description.
 func (t *CronTool) Description() string {
-	return "Manage scheduled cron jobs. Actions: add, list, remove, enable, disable."
+	return "Manage scheduled cron jobs. Actions: add, list, status, run, remove, enable, disable. Cron expressions are local wall-clock time in timezone; do not convert requested local times to UTC first."
 }
 
 // Parameters returns the tool parameters.
@@ -41,7 +41,7 @@ func (t *CronTool) Parameters() map[string]interfaces.ParameterSpec {
 	return map[string]interfaces.ParameterSpec{
 		"action": {
 			Type:        "string",
-			Description: "Action to perform: add, list, remove, enable, disable",
+			Description: "Action to perform: add, list, status, run, remove, enable, disable",
 			Required:    true,
 		},
 		"name": {
@@ -66,12 +66,22 @@ func (t *CronTool) Parameters() map[string]interfaces.ParameterSpec {
 		},
 		"cron_expr": {
 			Type:        "string",
-			Description: "Standard cron expression",
+			Description: "Standard 5-field cron expression in local wall-clock time for timezone, e.g. 5 8 * * * means 08:05 in that timezone",
+			Required:    false,
+		},
+		"timezone": {
+			Type:        "string",
+			Description: "IANA timezone for cron_expr, e.g. Europe/Amsterdam. Defaults to configured cron timezone.",
 			Required:    false,
 		},
 		"deliver": {
 			Type:        "boolean",
 			Description: "Deliver directly without agent processing",
+			Required:    false,
+		},
+		"force": {
+			Type:        "boolean",
+			Description: "For action=run, run even when the job is not currently due. Defaults to true.",
 			Required:    false,
 		},
 		"command": {
@@ -102,6 +112,10 @@ func (t *CronTool) Execute(ctx context.Context, args string) (string, error) {
 		return t.addJob(ctx, params)
 	case "list":
 		return t.listJobs()
+	case "status":
+		return t.scheduler.Status()
+	case "run":
+		return t.runJob(params)
 	case "remove":
 		return t.removeJob(params)
 	case "enable":
@@ -156,6 +170,7 @@ func (t *CronTool) addJob(ctx context.Context, params map[string]any) (string, e
 		}
 	}
 	cronExpr, _ := params["cron_expr"].(string)
+	timezone, _ := params["timezone"].(string)
 
 	if atSeconds == nil && everySeconds == nil && cronExpr == "" {
 		return "", fmt.Errorf("one of at_seconds, every_seconds, or cron_expr is required")
@@ -185,6 +200,7 @@ func (t *CronTool) addJob(ctx context.Context, params map[string]any) (string, e
 		AtSeconds:    atSeconds,
 		EverySeconds: everySeconds,
 		CronExpr:     cronExpr,
+		Timezone:     timezone,
 		Deliver:      deliver,
 		Command:      command,
 		Enabled:      true,
@@ -202,11 +218,27 @@ func (t *CronTool) addJob(ctx context.Context, params map[string]any) (string, e
 	job.Channel = job.Context.Channel
 	job.ChatID = job.Context.ChatID
 	job.SenderID = job.Context.SenderID
+	if job.CronExpr != "" && job.Timezone == "" {
+		job.Timezone = t.cfg.Tools.Cron.Timezone
+		if job.Timezone == "" {
+			job.Timezone = "UTC"
+		}
+	}
 
 	if err := t.scheduler.AddJob(job); err != nil {
 		return "", err
 	}
 
+	jobs, _ := t.scheduler.ListJobs()
+	for _, saved := range jobs {
+		if saved.Name == name && saved.State.NextRunAt != nil {
+			local := saved.State.NextRunAt.UTC()
+			if loc, err := time.LoadLocation(saved.Timezone); err == nil {
+				local = saved.State.NextRunAt.In(loc)
+			}
+			return fmt.Sprintf("Job %q added successfully. Next run: %s (%s UTC)", name, local.Format(time.RFC3339), saved.State.NextRunAt.UTC().Format(time.RFC3339)), nil
+		}
+	}
 	return fmt.Sprintf("Job %q added successfully", name), nil
 }
 
@@ -227,6 +259,26 @@ func (t *CronTool) removeJob(params map[string]any) (string, error) {
 		return "", err
 	}
 	return fmt.Sprintf("Job %q removed", name), nil
+}
+
+func (t *CronTool) runJob(params map[string]any) (string, error) {
+	name, _ := params["name"].(string)
+	if name == "" {
+		return "", fmt.Errorf("name is required for run")
+	}
+	force := true
+	if v, ok := params["force"]; ok {
+		switch val := v.(type) {
+		case bool:
+			force = val
+		case string:
+			force = strings.ToLower(val) == "true"
+		}
+	}
+	if err := t.scheduler.RunJob(name, force); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("Job %q run started", name), nil
 }
 
 func (t *CronTool) enableJob(params map[string]any) (string, error) {

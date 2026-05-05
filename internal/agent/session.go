@@ -20,6 +20,7 @@ import (
 	"github.com/sushi30/sushiclaw/pkg/channels"
 	"github.com/sushi30/sushiclaw/pkg/commands"
 	"github.com/sushi30/sushiclaw/pkg/config"
+	cronpkg "github.com/sushi30/sushiclaw/pkg/cron"
 	"github.com/sushi30/sushiclaw/pkg/llm/openrouter"
 	"github.com/sushi30/sushiclaw/pkg/logger"
 	"github.com/sushi30/sushiclaw/pkg/media"
@@ -519,6 +520,98 @@ func (sm *SessionManager) Dispatch(ctx context.Context, msg bus.InboundMessage) 
 	}
 	turnCtx, turnSeq, turnDone := s.startTurn(ctx)
 	s.handleInbound(turnCtx, msg, key, turnSeq, turnDone)
+}
+
+// RunCronAgentTurn executes an agent turn synchronously for the cron scheduler.
+// Cron needs a concrete success/failure result; publishing onto the inbound bus
+// only proves that a message was queued, not that the agent completed.
+func (sm *SessionManager) RunCronAgentTurn(ctx context.Context, msg bus.InboundMessage) (cronpkg.AgentRunResult, error) {
+	key := computeSessionKey(msg)
+	s, err := sm.getOrCreateSession(key)
+	if err != nil {
+		if sm.bus != nil {
+			_ = sm.bus.PublishOutbound(ctx, bus.MarkSystemOutboundMessage(bus.OutboundMessage{
+				Channel: msg.Channel,
+				ChatID:  msg.ChatID,
+				Context: msg.Context,
+				Content: fmt.Sprintf("Cron agent turn failed before start: %v", err),
+			}))
+		}
+		return cronpkg.AgentRunResult{}, err
+	}
+	turnCtx, turnSeq, turnDone := s.startTurn(ctx)
+	defer s.finishTurn(turnSeq, turnDone)
+
+	chatID := msg.ChatID
+	actx := exec.WithChatID(turnCtx, chatID)
+	actx = toolctx.WithChannel(actx, msg.Channel)
+	actx = toolctx.WithSenderID(actx, msg.SenderID)
+	actx = toolctx.WithInboundContext(actx, msg.Context)
+
+	logger.DebugCF("agent", "Processing cron message", map[string]any{
+		"chat_id": chatID,
+		"sender":  msg.Sender.CanonicalID,
+		"preview": truncate(msg.Content, 50),
+	})
+	start := time.Now()
+	sm.emitProgress(turnCtx, ProgressEvent{Channel: msg.Channel, ChatID: chatID, Kind: ProgressTurnStarted})
+	response, usage, toolCalls, err := s.runDetailedTurn(actx, msg.Content)
+	elapsed := time.Since(start)
+	responseBytes := len(response)
+	if err != nil {
+		if s.turnCanceled(turnCtx, turnSeq, err) {
+			return cronpkg.AgentRunResult{}, err
+		}
+		logger.ErrorCF("agent", "Cron agent run failed", map[string]any{"error": err.Error()})
+		s.logTurnSummary(msg.Channel, chatID, elapsed, usage, toolCalls, responseBytes, err)
+		if sm.bus != nil {
+			_ = sm.bus.PublishOutbound(turnCtx, bus.MarkSystemOutboundMessage(bus.OutboundMessage{
+				Channel:    msg.Channel,
+				ChatID:     chatID,
+				Context:    msg.Context,
+				SessionKey: key,
+				Content:    userFacingRunError(err),
+			}))
+		}
+		sm.emitProgress(turnCtx, ProgressEvent{Channel: msg.Channel, ChatID: chatID, Kind: ProgressFailed, Error: err, Elapsed: elapsed})
+		sm.emitSummary(turnCtx, ProgressSummary{
+			Channel:       msg.Channel,
+			ChatID:        chatID,
+			Success:       false,
+			ToolCalls:     toolCalls,
+			Usage:         usage,
+			Duration:      elapsed,
+			ResponseBytes: responseBytes,
+			Error:         err,
+		})
+		return cronpkg.AgentRunResult{Response: response, ToolCalls: toolCalls, ResponseBytes: responseBytes}, err
+	}
+	if s.turnCanceled(turnCtx, turnSeq, nil) {
+		return cronpkg.AgentRunResult{}, context.Canceled
+	}
+	if response != "" && sm.bus != nil {
+		if err := sm.bus.PublishOutbound(turnCtx, bus.OutboundMessage{
+			Channel:    msg.Channel,
+			ChatID:     chatID,
+			Context:    msg.Context,
+			SessionKey: key,
+			Content:    response,
+		}); err != nil {
+			return cronpkg.AgentRunResult{Response: response, ToolCalls: toolCalls, ResponseBytes: responseBytes}, err
+		}
+	}
+	s.logTurnSummary(msg.Channel, chatID, elapsed, usage, toolCalls, responseBytes, nil)
+	sm.emitProgress(turnCtx, ProgressEvent{Channel: msg.Channel, ChatID: chatID, Kind: ProgressCompleted, Elapsed: elapsed})
+	sm.emitSummary(turnCtx, ProgressSummary{
+		Channel:       msg.Channel,
+		ChatID:        chatID,
+		Success:       true,
+		ToolCalls:     toolCalls,
+		Usage:         usage,
+		Duration:      elapsed,
+		ResponseBytes: responseBytes,
+	})
+	return cronpkg.AgentRunResult{Response: response, ToolCalls: toolCalls, ResponseBytes: responseBytes}, nil
 }
 
 func computeSessionKey(msg bus.InboundMessage) string {

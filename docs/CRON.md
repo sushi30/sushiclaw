@@ -14,7 +14,8 @@ Enable cron in `config.json`:
     "cron": {
       "enabled": true,
       "allow_command": false,
-      "exec_timeout_minutes": 5
+      "exec_timeout_minutes": 5,
+      "timezone": "Europe/Amsterdam"
     }
   }
 }
@@ -31,6 +32,10 @@ Cron jobs support three schedule types:
 - `every_seconds`: run repeatedly at an interval.
 - `cron_expr`: run on a standard cron expression.
 
+`cron_expr` uses local wall-clock time in the job `timezone`. If no timezone is supplied when the
+job is created, the scheduler uses `tools.cron.timezone`, then falls back to `UTC`. Do not convert
+requested local times to UTC before writing the cron expression.
+
 Jobs can run in three modes:
 
 - Agent turn: sends the saved prompt back through the agent, so the model can reason and use tools.
@@ -39,6 +44,10 @@ Jobs can run in three modes:
 
 The agent fills in the channel, chat ID, and sender ID from the conversation where the job is
 created.
+
+The scheduler persists execution state in `cron/jobs.json`: next run, running marker, last run
+status, last error, duration, and consecutive errors. On gateway restart it marks stale running jobs
+as interrupted and catches up a bounded number of missed jobs.
 
 ## Example Prompts
 
@@ -76,6 +85,14 @@ Disable the weekly-review cron job.
 Remove the weekly-review cron job.
 ```
 
+```text
+Run the weekly-review cron job now.
+```
+
+```text
+Show cron status.
+```
+
 If command jobs are enabled:
 
 ```text
@@ -91,6 +108,7 @@ Use `/list cron` to list scheduled cron jobs without asking the agent to use the
 ```
 
 The response shows each job name, whether it is disabled, how it runs, and its schedule.
+It also includes next run, last status, and last error when available.
 
 ## CLI
 

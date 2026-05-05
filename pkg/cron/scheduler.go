@@ -42,6 +42,7 @@ type Scheduler struct {
 	bus         *bus.MessageBus
 	cfg         *config.Config
 	agentRunner AgentRunner
+	ctx         context.Context
 	started     bool
 	stopped     bool
 	mu          sync.Mutex
@@ -76,12 +77,16 @@ func (s *Scheduler) SetAgentRunner(r AgentRunner) {
 }
 
 // Start begins the cron runner.
-func (s *Scheduler) Start() {
+func (s *Scheduler) Start(ctx context.Context) {
 	s.mu.Lock()
 	if s.started {
 		s.mu.Unlock()
 		return
 	}
+	if ctx == nil {
+		ctx = context.TODO()
+	}
+	s.ctx = ctx
 	s.started = true
 	s.stopped = false
 	s.mu.Unlock()
@@ -246,6 +251,10 @@ func (s *Scheduler) Status() (string, error) {
 }
 
 func (s *Scheduler) RunJob(name string, force bool) error {
+	ctx, ok := s.executionContext()
+	if !ok {
+		return fmt.Errorf("cron scheduler is not started")
+	}
 	job, ok, err := s.claimJob(name, time.Now(), force)
 	if err != nil {
 		return err
@@ -253,13 +262,17 @@ func (s *Scheduler) RunJob(name string, force bool) error {
 	if !ok {
 		return fmt.Errorf("job %q is not due", name)
 	}
-	go s.executeClaimedJob(job)
+	go s.executeClaimedJob(ctx, job)
 	return nil
 }
 
 func (s *Scheduler) tick() {
 	now := time.Now()
 	for {
+		ctx, ok := s.executionContext()
+		if !ok {
+			break
+		}
 		job, ok, err := s.claimNextDueJob(now)
 		if err != nil {
 			logger.ErrorCF("cron", "Failed to claim due job", map[string]any{"error": err.Error()})
@@ -268,7 +281,7 @@ func (s *Scheduler) tick() {
 		if !ok {
 			break
 		}
-		go s.executeClaimedJob(job)
+		go s.executeClaimedJob(ctx, job)
 	}
 
 	s.mu.Lock()
@@ -335,16 +348,16 @@ func (s *Scheduler) claimJob(name string, now time.Time, force bool) (Job, bool,
 	return Job{}, false, fmt.Errorf("job %q not found", name)
 }
 
-func (s *Scheduler) executeClaimedJob(job Job) {
+func (s *Scheduler) executeClaimedJob(ctx context.Context, job Job) {
 	start := time.Now()
-	err := s.runJob(context.Background(), job)
+	err := s.runJob(ctx, job)
 	status := StatusOK
 	errText := ""
 	if err != nil {
 		status = StatusError
 		errText = err.Error()
 		logger.ErrorCF("cron", "Cron job failed", map[string]any{"job": job.Name, "error": errText})
-		s.notifyFailure(context.Background(), job, errText)
+		s.notifyFailure(ctx, job, errText)
 	}
 	s.finishJob(job.Name, status, errText, start, time.Now())
 }
@@ -352,7 +365,7 @@ func (s *Scheduler) executeClaimedJob(job Job) {
 // executeJob is retained for focused tests and manual execution paths.
 func (s *Scheduler) executeJob(job Job) {
 	start := time.Now()
-	err := s.runJob(context.Background(), job)
+	err := s.runJob(context.TODO(), job)
 	status := StatusOK
 	errText := ""
 	if err != nil {
@@ -425,6 +438,15 @@ func (s *Scheduler) finishJob(name, status, errText string, startedAt, endedAt t
 		logger.ErrorCF("cron", "Failed to save job result", map[string]any{"job": name, "error": err.Error()})
 		return
 	}
+	fields := map[string]any{
+		"job":         name,
+		"status":      status,
+		"duration_ms": endedAt.Sub(startedAt).Milliseconds(),
+	}
+	if errText != "" {
+		fields["error"] = errText
+	}
+	logger.DebugCF("cron", "Cron job finished", fields)
 	s.armTimerLocked(time.Now())
 }
 
@@ -541,6 +563,10 @@ func (s *Scheduler) markInterruptedRuns() {
 }
 
 func (s *Scheduler) runMissedJobs() {
+	ctx, ok := s.executionContext()
+	if !ok {
+		return
+	}
 	for i := 0; i < defaultStartupCatchupLimit; i++ {
 		job, ok, err := s.claimNextDueJob(time.Now())
 		if err != nil {
@@ -551,10 +577,27 @@ func (s *Scheduler) runMissedJobs() {
 			return
 		}
 		delay := time.Duration(i) * defaultStartupCatchupStagger
-		time.AfterFunc(delay, func() {
-			s.executeClaimedJob(job)
-		})
+		go func(job Job, delay time.Duration) {
+			timer := time.NewTimer(delay)
+			defer timer.Stop()
+			select {
+			case <-ctx.Done():
+				now := time.Now()
+				s.finishJob(job.Name, StatusError, ctx.Err().Error(), now, now)
+			case <-timer.C:
+				s.executeClaimedJob(ctx, job)
+			}
+		}(job, delay)
 	}
+}
+
+func (s *Scheduler) executionContext() (context.Context, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopped || s.ctx == nil {
+		return nil, false
+	}
+	return s.ctx, true
 }
 
 func (s *Scheduler) recomputeNextRunsLocked(jobs []Job, now time.Time, recomputeExisting bool) bool {

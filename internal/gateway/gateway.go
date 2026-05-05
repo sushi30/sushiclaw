@@ -182,20 +182,21 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 		fmt.Println("Warning: no channels enabled")
 	}
 
-	if err = cm.StartAll(context.Background()); err != nil {
+	// Root gateway context; child services inherit this so shutdown cancels work.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err = cm.StartAll(ctx); err != nil {
 		return fmt.Errorf("error starting channels: %w", err)
 	}
 
 	if cronScheduler != nil {
-		cronScheduler.Start()
+		cronScheduler.Start(ctx)
 		logger.InfoC("gateway", "Cron scheduler started")
 	}
 
 	fmt.Printf("Gateway started\n")
 	fmt.Println("Press Ctrl+C to stop")
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	rt.SetDebug = dm.Set
 	lockController.Register(rt)
@@ -307,11 +308,13 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 	<-sigChan
 
 	logger.Info("Shutting down...")
+	cancel()
 
 	if cronScheduler != nil {
 		cronScheduler.Stop()
 	}
 
+	// Shutdown has its own timeout because the root gateway context is already canceled.
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), gracefulShutdownTimeout)
 	defer shutdownCancel()
 	_ = cm.StopAll(shutdownCtx)

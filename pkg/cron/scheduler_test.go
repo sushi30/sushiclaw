@@ -1,6 +1,7 @@
 package cron
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 	"time"
@@ -222,4 +223,63 @@ func TestSchedulerFinishJobPersistsStatusAndNextRun(t *testing.T) {
 	require.NotNil(t, jobs[0].State.LastRunAt)
 	require.NotNil(t, jobs[0].State.NextRunAt)
 	require.Equal(t, start.Add(62*time.Second), *jobs[0].State.NextRunAt)
+}
+
+func TestSchedulerRunJobUsesStartContext(t *testing.T) {
+	t.Parallel()
+
+	scheduler := newExecutionTestScheduler(t, false)
+	started := make(chan struct{})
+	done := make(chan struct{})
+	scheduler.SetAgentRunner(blockingAgentRunner{
+		started: started,
+		done:    done,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	scheduler.Start(ctx)
+
+	job := Job{
+		Name:    "agent",
+		Message: "check",
+		Context: bus.InboundContext{
+			Channel:  "telegram",
+			ChatID:   "123",
+			SenderID: "123",
+		},
+		Enabled:   true,
+		CreatedAt: time.Now(),
+	}
+	require.NoError(t, scheduler.AddJob(job))
+	require.NoError(t, scheduler.RunJob(job.Name, true))
+
+	require.Eventually(t, func() bool {
+		select {
+		case <-started:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+	cancel()
+	require.Eventually(t, func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+}
+
+type blockingAgentRunner struct {
+	started chan struct{}
+	done    chan struct{}
+}
+
+func (r blockingAgentRunner) RunCronAgentTurn(ctx context.Context, _ bus.InboundMessage) (AgentRunResult, error) {
+	close(r.started)
+	<-ctx.Done()
+	close(r.done)
+	return AgentRunResult{}, ctx.Err()
 }

@@ -9,14 +9,14 @@ import (
 	"github.com/sushi30/sushiclaw/pkg/config"
 )
 
-// TestLoadExampleConfig verifies that config.example.json is a valid config
+// TestLoadExampleConfig verifies that config.example.yaml is a valid config
 // that loads without error and has the expected structure.
 func TestLoadExampleConfig(t *testing.T) {
 	// Copy to temp dir so migration writes (backup + saved v2) go there, not source tree.
 	tmpDir := t.TempDir()
-	dst := filepath.Join(tmpDir, "config.json")
+	dst := filepath.Join(tmpDir, "config.yaml")
 
-	src, err := os.Open("../../config.example.json")
+	src, err := os.Open("../../config.example.yaml")
 	if err != nil {
 		t.Fatalf("open example config: %v", err)
 	}

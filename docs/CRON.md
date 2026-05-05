@@ -6,7 +6,7 @@ workspace at `cron/jobs.json`.
 
 ## Enable The Tool
 
-Enable cron in `config.json`:
+Enable cron in `config.yaml`:
 
 ```json
 {

@@ -19,8 +19,8 @@ cd sushiclaw
 
 ```bash
 mkdir -p ~/.picoclaw
-cp config.example.json ~/.picoclaw/config.json
-# Edit config.json — set your model API key and enable at least one channel
+cp config.example.yaml ~/.picoclaw/config.yaml
+# Edit config.yaml — set your model API key and enable at least one channel
 ```
 
 ### 3. Build and run
@@ -45,6 +45,7 @@ sushiclaw gateway
 |---------|-------------|
 | `sushiclaw gateway` | Start the full gateway (all channels) |
 | `sushiclaw chat` | Interactive terminal chat with the agent |
+| `sushiclaw migrate-config` | Convert a legacy JSON config to YAML |
 | `sushiclaw version` | Print build version info |
 
 ### `gateway` flags
@@ -79,25 +80,24 @@ Health check hits `http://localhost:18790/health`.
 
 ## Configuration
 
-Copy `config.example.json` to `~/.picoclaw/config.json`. Key sections:
+Copy `config.example.yaml` to `~/.picoclaw/config.yaml`. Key sections:
 
-```json
-{
-  "agents": {
-    "defaults": {
-      "workspace": "~/.picoclaw/workspace",
-      "model_name": "gpt-4o-mini"
-    }
-  },
-  "model_list": [{ "model_name": "gpt-4o-mini", "api_key": "env://OPENAI_API_KEY" }],
-  "sessions": {
-    "directory": "~/.sushiclaw/sessions"
-  },
-  "channels": {
-    "email": { "enabled": false, "type": "email", "...": "..." }
-  },
-  "tools": { ... }
-}
+```yaml
+agents:
+  defaults:
+    workspace: "~/.picoclaw/workspace"
+    model_name: gpt-4o-mini
+model_list:
+  - model_name: gpt-4o-mini
+    api_key: env://OPENAI_API_KEY
+sessions:
+  directory: "~/.sushiclaw/sessions"
+channels:
+  email:
+    enabled: false
+    type: email
+    "...": "..."
+tools: { ... }
 ```
 
 Override config path with `$SUSHICLAW_CONFIG`.
@@ -113,7 +113,7 @@ defaults. The `/clear` command removes the current session's persisted history.
 
 ### `env://` config resolver
 
-API keys in `config.json` can reference environment variables:
+API keys in `config.yaml` can reference environment variables:
 
 ```json
 { "api_key": "env://OPENAI_API_KEY" }

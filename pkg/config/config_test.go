@@ -11,7 +11,7 @@ import (
 )
 
 func TestParseExampleConfig(t *testing.T) {
-	cfg, err := config.LoadConfig("../../config.example.json")
+	cfg, err := config.LoadConfig("../../config.example.yaml")
 	require.NoError(t, err)
 
 	assert.Equal(t, "gpt-4o-mini", cfg.Agents.Defaults.ModelName)
@@ -22,7 +22,7 @@ func TestParseExampleConfig(t *testing.T) {
 }
 
 func TestChannelDecode(t *testing.T) {
-	cfg, err := config.LoadConfig("../../config.example.json")
+	cfg, err := config.LoadConfig("../../config.example.yaml")
 	require.NoError(t, err)
 
 	tgCh := cfg.Channels["telegram"]
@@ -42,7 +42,7 @@ func TestSecureStringEnvResolve(t *testing.T) {
 }
 
 func TestFlexibleStringSlice(t *testing.T) {
-	cfg, err := config.LoadConfig("../../config.example.json")
+	cfg, err := config.LoadConfig("../../config.example.yaml")
 	require.NoError(t, err)
 
 	tgCh := cfg.Channels["telegram"]
@@ -52,7 +52,7 @@ func TestFlexibleStringSlice(t *testing.T) {
 }
 
 func TestMCPConfigParsing(t *testing.T) {
-	cfg, err := config.LoadConfig("../../config.example.json")
+	cfg, err := config.LoadConfig("../../config.example.yaml")
 	require.NoError(t, err)
 
 	require.NotEmpty(t, cfg.MCP.MCPServers)

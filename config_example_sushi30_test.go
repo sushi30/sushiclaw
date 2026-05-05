@@ -12,11 +12,11 @@ import (
 func TestExampleConfigLoadsAsV2(t *testing.T) {
 	_, callerFile, _, _ := runtime.Caller(0)
 	repoRoot := filepath.Dir(callerFile)
-	src := filepath.Join(repoRoot, "config.example.json")
+	src := filepath.Join(repoRoot, "config.example.yaml")
 
 	// Copy to tmpDir so LoadConfig can't mutate the source file
 	tmpDir := t.TempDir()
-	dst := filepath.Join(tmpDir, "config.json")
+	dst := filepath.Join(tmpDir, "config.yaml")
 	data, err := os.ReadFile(src)
 	if err != nil {
 		t.Fatalf("read config.example.json: %v", err)

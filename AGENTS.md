@@ -103,6 +103,14 @@ All channels and the agent share a single `MessageBus`. The gateway runs one gor
 processing (filter → executor/agent) and the channel manager runs one goroutine for outbound
 dispatch (placeholder editing, typing stops, reaction undos, normal sends).
 
+### Context propagation
+
+Long-running services and goroutines should inherit a `context.Context` from their parent execution
+path so gateway shutdown can cancel in-flight work cleanly. Do not use `context.Background()` inside
+services except when creating the root process context or in tests/helpers that have no parent
+context. Any non-root use of `context.Background()` must include a comment explaining why it cannot
+inherit a parent context.
+
 ## Build commands
 
 ```bash

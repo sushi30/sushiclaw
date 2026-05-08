@@ -145,9 +145,10 @@ type ExecToolConfig struct {
 }
 
 type CronToolConfig struct {
-	Enabled            bool `json:"enabled"`
-	AllowCommand       bool `json:"allow_command"`
-	ExecTimeoutMinutes int  `json:"exec_timeout_minutes"`
+	Enabled            bool   `json:"enabled"`
+	AllowCommand       bool   `json:"allow_command"`
+	ExecTimeoutMinutes int    `json:"exec_timeout_minutes"`
+	Timezone           string `json:"timezone,omitempty"`
 }
 
 type MediaCleanupCfg struct {

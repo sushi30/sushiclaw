@@ -3,6 +3,7 @@ package cron
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -14,18 +15,40 @@ import (
 	"github.com/sushi30/sushiclaw/pkg/tools/exec"
 )
 
-// Scheduler manages the lifecycle and execution of cron jobs.
-type Scheduler struct {
-	store   *Store
-	cron    *cron.Cron
-	timers  map[string]*time.Timer
-	entries map[string]cron.EntryID
-	bus     *bus.MessageBus
-	cfg     *config.Config
-	mu      sync.RWMutex
+const (
+	defaultTimezone               = "UTC"
+	startupInterruptedError       = "cron: job interrupted by gateway restart"
+	defaultStartupCatchupLimit    = 5
+	defaultStartupCatchupStagger  = 5 * time.Second
+	defaultSchedulerMaxTimerDelay = time.Minute
+)
+
+// AgentRunner executes cron agent turns synchronously so the scheduler can
+// persist success/failure instead of only enqueueing an inbound message.
+type AgentRunner interface {
+	RunCronAgentTurn(ctx context.Context, msg bus.InboundMessage) (AgentRunResult, error)
 }
 
-// NewScheduler loads existing jobs and schedules enabled ones.
+type AgentRunResult struct {
+	Response      string
+	ToolCalls     int
+	ResponseBytes int
+}
+
+// Scheduler manages the lifecycle and execution of cron jobs.
+type Scheduler struct {
+	store       *Store
+	timer       *time.Timer
+	bus         *bus.MessageBus
+	cfg         *config.Config
+	agentRunner AgentRunner
+	ctx         context.Context
+	started     bool
+	stopped     bool
+	mu          sync.Mutex
+}
+
+// NewScheduler loads existing jobs and prepares the scheduler.
 func NewScheduler(cfg *config.Config, messageBus *bus.MessageBus) (*Scheduler, error) {
 	storePath := cfg.WorkspacePath() + "/cron/jobs.json"
 	store := NewStore(storePath)
@@ -35,35 +58,55 @@ func NewScheduler(cfg *config.Config, messageBus *bus.MessageBus) (*Scheduler, e
 	}
 
 	s := &Scheduler{
-		store:   store,
-		cron:    cron.New(),
-		timers:  make(map[string]*time.Timer),
-		entries: make(map[string]cron.EntryID),
-		bus:     messageBus,
-		cfg:     cfg,
+		store: store,
+		bus:   messageBus,
+		cfg:   cfg,
 	}
-
-	for _, job := range jobs {
-		if job.Enabled {
-			s.scheduleJob(job)
+	if changed := s.recomputeNextRunsLocked(jobs, time.Now(), true); changed {
+		if err := s.store.Save(jobs); err != nil {
+			return nil, fmt.Errorf("persist cron state: %w", err)
 		}
 	}
-
 	return s, nil
 }
 
+func (s *Scheduler) SetAgentRunner(r AgentRunner) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.agentRunner = r
+}
+
 // Start begins the cron runner.
-func (s *Scheduler) Start() {
-	s.cron.Start()
+func (s *Scheduler) Start(ctx context.Context) {
+	s.mu.Lock()
+	if s.started {
+		s.mu.Unlock()
+		return
+	}
+	if ctx == nil {
+		ctx = context.TODO()
+	}
+	s.ctx = ctx
+	s.started = true
+	s.stopped = false
+	s.mu.Unlock()
+
+	s.markInterruptedRuns()
+	s.runMissedJobs()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.armTimerLocked(time.Now())
 }
 
 // Stop halts the cron runner and cancels pending timers.
 func (s *Scheduler) Stop() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.cron.Stop()
-	for _, t := range s.timers {
-		t.Stop()
+	s.stopped = true
+	if s.timer != nil {
+		s.timer.Stop()
+		s.timer = nil
 	}
 }
 
@@ -81,13 +124,27 @@ func (s *Scheduler) AddJob(job Job) error {
 			return fmt.Errorf("job %q already exists", job.Name)
 		}
 	}
+	if job.CreatedAt.IsZero() {
+		job.CreatedAt = time.Now()
+	}
+	if job.Timezone == "" && job.CronExpr != "" {
+		job.Timezone = s.defaultTimezone()
+	}
+	if job.Enabled {
+		next, err := s.computeNextRun(job, time.Now())
+		if err != nil {
+			job.State.LastStatus = StatusError
+			job.State.LastError = "schedule error: " + err.Error()
+			job.State.ConsecutiveErrors++
+		} else {
+			job.State.NextRunAt = next
+		}
+	}
 	jobs = append(jobs, job)
 	if err := s.store.Save(jobs); err != nil {
 		return err
 	}
-	if job.Enabled {
-		s.scheduleJob(job)
-	}
+	s.armTimerLocked(time.Now())
 	return nil
 }
 
@@ -114,37 +171,34 @@ func (s *Scheduler) RemoveJob(name string) error {
 	if err := s.store.Save(jobs); err != nil {
 		return err
 	}
-	s.unscheduleJob(name)
+	s.armTimerLocked(time.Now())
 	return nil
 }
 
 // EnableJob enables and schedules a job.
 func (s *Scheduler) EnableJob(name string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	jobs, err := s.store.Load()
-	if err != nil {
-		return err
-	}
-	for i := range jobs {
-		if jobs[i].Name == name {
-			if jobs[i].Enabled {
-				return nil
-			}
-			jobs[i].Enabled = true
-			if err := s.store.Save(jobs); err != nil {
-				return err
-			}
-			s.scheduleJob(jobs[i])
-			return nil
+	return s.updateJob(name, func(job *Job) error {
+		job.Enabled = true
+		next, err := s.computeNextRun(*job, time.Now())
+		if err != nil {
+			return err
 		}
-	}
-	return fmt.Errorf("job %q not found", name)
+		job.State.NextRunAt = next
+		return nil
+	})
 }
 
 // DisableJob disables and unschedules a job.
 func (s *Scheduler) DisableJob(name string) error {
+	return s.updateJob(name, func(job *Job) error {
+		job.Enabled = false
+		job.State.NextRunAt = nil
+		job.State.RunningAt = nil
+		return nil
+	})
+}
+
+func (s *Scheduler) updateJob(name string, fn func(*Job) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -153,129 +207,251 @@ func (s *Scheduler) DisableJob(name string) error {
 		return err
 	}
 	for i := range jobs {
-		if jobs[i].Name == name {
-			if !jobs[i].Enabled {
-				return nil
-			}
-			jobs[i].Enabled = false
-			if err := s.store.Save(jobs); err != nil {
-				return err
-			}
-			s.unscheduleJob(name)
-			return nil
+		if jobs[i].Name != name {
+			continue
 		}
+		if err := fn(&jobs[i]); err != nil {
+			return err
+		}
+		if err := s.store.Save(jobs); err != nil {
+			return err
+		}
+		s.armTimerLocked(time.Now())
+		return nil
 	}
 	return fmt.Errorf("job %q not found", name)
 }
 
 // ListJobs returns all persisted jobs.
 func (s *Scheduler) ListJobs() ([]Job, error) {
-	return s.store.Load()
-}
-
-func (s *Scheduler) scheduleJob(job Job) {
-	if !job.Enabled {
-		return
-	}
-
-	// Priority: at_seconds > every_seconds > cron_expr
-	switch {
-	case job.AtSeconds != nil:
-		runAt := job.CreatedAt.Add(time.Duration(*job.AtSeconds) * time.Second)
-		now := time.Now()
-		if now.After(runAt) {
-			go s.executeJob(job)
-			_ = s.RemoveJob(job.Name)
-			return
-		}
-		d := runAt.Sub(now)
-		s.timers[job.Name] = time.AfterFunc(d, func() {
-			s.executeJob(job)
-			_ = s.RemoveJob(job.Name)
-		})
-	case job.EverySeconds != nil:
-		schedule := cron.Every(time.Duration(*job.EverySeconds) * time.Second)
-		id := s.cron.Schedule(schedule, cron.FuncJob(func() {
-			s.executeJob(job)
-		}))
-		s.entries[job.Name] = id
-	case job.CronExpr != "":
-		id, err := s.cron.AddFunc(job.CronExpr, func() {
-			s.executeJob(job)
-		})
-		if err != nil {
-			logger.ErrorCF("cron", "Invalid cron expression", map[string]any{
-				"job":   job.Name,
-				"expr":  job.CronExpr,
-				"error": err.Error(),
-			})
-			return
-		}
-		s.entries[job.Name] = id
-	}
-}
-
-func (s *Scheduler) unscheduleJob(name string) {
-	if timer, ok := s.timers[name]; ok {
-		timer.Stop()
-		delete(s.timers, name)
-	}
-	if entryID, ok := s.entries[name]; ok {
-		s.cron.Remove(entryID)
-		delete(s.entries, name)
-	}
-}
-
-func (s *Scheduler) executeJob(job Job) {
-	// Reload to respect disable/remove that happened after scheduling.
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	jobs, err := s.store.Load()
 	if err != nil {
-		logger.ErrorCF("cron", "Failed to reload job", map[string]any{"error": err.Error()})
-		return
+		return nil, err
 	}
-	var current *Job
-	for i := range jobs {
-		if jobs[i].Name == job.Name {
-			current = &jobs[i]
-			break
+	if changed := s.recomputeNextRunsLocked(jobs, time.Now(), false); changed {
+		if err := s.store.Save(jobs); err != nil {
+			return nil, err
 		}
 	}
-	if current == nil || !current.Enabled {
-		return
-	}
-
-	logger.InfoCF("cron", "Executing job", map[string]any{
-		"name":    current.Name,
-		"channel": current.targetContext().Channel,
-		"chat_id": current.targetContext().ChatID,
-	})
-
-	ctx := context.Background()
-	target := current.targetContext()
-	if target.Channel == "" || target.ChatID == "" {
-		logger.WarnCF("cron", "Skipping cron job with missing routing context", map[string]any{
-			"job": current.Name,
-		})
-		return
-	}
-
-	if current.Command != "" {
-		s.executeCommandJob(ctx, *current)
-		return
-	}
-
-	if current.Deliver {
-		s.deliverMessage(ctx, *current)
-		return
-	}
-
-	s.agentTurn(ctx, *current)
+	return jobs, nil
 }
 
-func (s *Scheduler) agentTurn(ctx context.Context, job Job) {
+func (s *Scheduler) Status() (string, error) {
+	jobs, err := s.ListJobs()
+	if err != nil {
+		return "", err
+	}
+	next := nextWake(jobs)
+	if next == nil {
+		return fmt.Sprintf("Cron scheduler enabled. Jobs: %d. No next run scheduled.", len(jobs)), nil
+	}
+	return fmt.Sprintf("Cron scheduler enabled. Jobs: %d. Next run: %s.", len(jobs), next.UTC().Format(time.RFC3339)), nil
+}
+
+func (s *Scheduler) RunJob(name string, force bool) error {
+	ctx, ok := s.executionContext()
+	if !ok {
+		return fmt.Errorf("cron scheduler is not started")
+	}
+	job, ok, err := s.claimJob(name, time.Now(), force)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("job %q is not due", name)
+	}
+	go s.executeClaimedJob(ctx, job)
+	return nil
+}
+
+func (s *Scheduler) tick() {
+	now := time.Now()
+	for {
+		ctx, ok := s.executionContext()
+		if !ok {
+			break
+		}
+		job, ok, err := s.claimNextDueJob(now)
+		if err != nil {
+			logger.ErrorCF("cron", "Failed to claim due job", map[string]any{"error": err.Error()})
+			break
+		}
+		if !ok {
+			break
+		}
+		go s.executeClaimedJob(ctx, job)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.armTimerLocked(time.Now())
+}
+
+func (s *Scheduler) claimNextDueJob(now time.Time) (Job, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	jobs, err := s.store.Load()
+	if err != nil {
+		return Job{}, false, err
+	}
+	s.recomputeNextRunsLocked(jobs, now, false)
+	for i := range jobs {
+		if !isDue(jobs[i], now, false) || jobs[i].State.RunningAt != nil {
+			continue
+		}
+		runningAt := now.UTC()
+		jobs[i].State.RunningAt = &runningAt
+		jobs[i].State.LastError = ""
+		job := jobs[i]
+		if err := s.store.Save(jobs); err != nil {
+			return Job{}, false, err
+		}
+		return job, true, nil
+	}
+	if err := s.store.Save(jobs); err != nil {
+		return Job{}, false, err
+	}
+	return Job{}, false, nil
+}
+
+func (s *Scheduler) claimJob(name string, now time.Time, force bool) (Job, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	jobs, err := s.store.Load()
+	if err != nil {
+		return Job{}, false, err
+	}
+	s.recomputeNextRunsLocked(jobs, now, false)
+	for i := range jobs {
+		if jobs[i].Name != name {
+			continue
+		}
+		if jobs[i].State.RunningAt != nil {
+			return Job{}, false, fmt.Errorf("job %q is already running", name)
+		}
+		if !isDue(jobs[i], now, force) {
+			return Job{}, false, nil
+		}
+		runningAt := now.UTC()
+		jobs[i].State.RunningAt = &runningAt
+		jobs[i].State.LastError = ""
+		job := jobs[i]
+		if err := s.store.Save(jobs); err != nil {
+			return Job{}, false, err
+		}
+		return job, true, nil
+	}
+	return Job{}, false, fmt.Errorf("job %q not found", name)
+}
+
+func (s *Scheduler) executeClaimedJob(ctx context.Context, job Job) {
+	start := time.Now()
+	err := s.runJob(ctx, job)
+	status := StatusOK
+	errText := ""
+	if err != nil {
+		status = StatusError
+		errText = err.Error()
+		logger.ErrorCF("cron", "Cron job failed", map[string]any{"job": job.Name, "error": errText})
+		s.notifyFailure(ctx, job, errText)
+	}
+	s.finishJob(job.Name, status, errText, start, time.Now())
+}
+
+// executeJob is retained for focused tests and manual execution paths.
+func (s *Scheduler) executeJob(job Job) {
+	start := time.Now()
+	err := s.runJob(context.TODO(), job)
+	status := StatusOK
+	errText := ""
+	if err != nil {
+		status = StatusError
+		errText = err.Error()
+	}
+	s.finishJob(job.Name, status, errText, start, time.Now())
+}
+
+func (s *Scheduler) runJob(ctx context.Context, job Job) error {
 	target := job.targetContext()
-	// Cron agent turns run in a dedicated per-job session so recurring jobs
-	// build their own relevant history instead of inheriting unrelated chat turns.
+	logger.InfoCF("cron", "Executing job", map[string]any{
+		"name":    job.Name,
+		"channel": target.Channel,
+		"chat_id": target.ChatID,
+	})
+	if target.Channel == "" || target.ChatID == "" {
+		return fmt.Errorf("missing routing context")
+	}
+	if job.Command != "" {
+		return s.executeCommandJob(ctx, job)
+	}
+	if job.Deliver {
+		return s.deliverMessage(ctx, job)
+	}
+	return s.agentTurn(ctx, job)
+}
+
+func (s *Scheduler) finishJob(name, status, errText string, startedAt, endedAt time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	jobs, err := s.store.Load()
+	if err != nil {
+		logger.ErrorCF("cron", "Failed to persist job result", map[string]any{"job": name, "error": err.Error()})
+		return
+	}
+	now := endedAt.UTC()
+	for i := range jobs {
+		if jobs[i].Name != name {
+			continue
+		}
+		jobs[i].State.RunningAt = nil
+		jobs[i].State.LastRunAt = &now
+		jobs[i].State.LastStatus = status
+		jobs[i].State.LastError = errText
+		jobs[i].State.LastDurationMS = endedAt.Sub(startedAt).Milliseconds()
+		if status == StatusOK {
+			jobs[i].State.ConsecutiveErrors = 0
+		} else {
+			jobs[i].State.ConsecutiveErrors++
+		}
+		if jobs[i].AtSeconds != nil && status == StatusOK {
+			jobs[i].Enabled = false
+			jobs[i].State.NextRunAt = nil
+		} else if jobs[i].Enabled {
+			next, err := s.computeNextRun(jobs[i], endedAt)
+			if err != nil {
+				jobs[i].State.LastStatus = StatusError
+				jobs[i].State.LastError = "schedule error: " + err.Error()
+				jobs[i].State.ConsecutiveErrors++
+				jobs[i].State.NextRunAt = nil
+			} else {
+				jobs[i].State.NextRunAt = next
+			}
+		}
+		break
+	}
+	if err := s.store.Save(jobs); err != nil {
+		logger.ErrorCF("cron", "Failed to save job result", map[string]any{"job": name, "error": err.Error()})
+		return
+	}
+	fields := map[string]any{
+		"job":         name,
+		"status":      status,
+		"duration_ms": endedAt.Sub(startedAt).Milliseconds(),
+	}
+	if errText != "" {
+		fields["error"] = errText
+	}
+	logger.DebugCF("cron", "Cron job finished", fields)
+	s.armTimerLocked(time.Now())
+}
+
+func (s *Scheduler) agentTurn(ctx context.Context, job Job) error {
+	target := job.targetContext()
 	msg := bus.InboundMessage{
 		Context: target,
 		Sender: bus.SenderInfo{
@@ -284,15 +460,14 @@ func (s *Scheduler) agentTurn(ctx context.Context, job Job) {
 		Content:    job.Message,
 		SessionKey: cronSessionKey(job),
 	}
-	if err := s.bus.PublishInbound(ctx, msg); err != nil {
-		logger.ErrorCF("cron", "Failed to publish inbound cron job", map[string]any{
-			"job":   job.Name,
-			"error": err.Error(),
-		})
+	if s.agentRunner != nil {
+		_, err := s.agentRunner.RunCronAgentTurn(ctx, msg)
+		return err
 	}
+	return s.bus.PublishInbound(ctx, msg)
 }
 
-func (s *Scheduler) deliverMessage(ctx context.Context, job Job) {
+func (s *Scheduler) deliverMessage(ctx context.Context, job Job) error {
 	target := job.targetContext()
 	msg := bus.OutboundMessage{
 		Channel: target.Channel,
@@ -301,20 +476,12 @@ func (s *Scheduler) deliverMessage(ctx context.Context, job Job) {
 		Content: job.Message,
 	}
 	msg = bus.MarkSystemOutboundMessage(msg)
-	if err := s.bus.PublishOutbound(ctx, msg); err != nil {
-		logger.ErrorCF("cron", "Failed to publish outbound cron job", map[string]any{
-			"job":   job.Name,
-			"error": err.Error(),
-		})
-	}
+	return s.bus.PublishOutbound(ctx, msg)
 }
 
-func (s *Scheduler) executeCommandJob(ctx context.Context, job Job) {
+func (s *Scheduler) executeCommandJob(ctx context.Context, job Job) error {
 	if !s.cfg.Tools.IsToolEnabled("exec") {
-		logger.WarnCF("cron", "Exec tool disabled, skipping command job", map[string]any{
-			"job": job.Name,
-		})
-		return
+		return fmt.Errorf("exec tool disabled")
 	}
 
 	timeout := time.Duration(s.cfg.Tools.Cron.ExecTimeoutMinutes) * time.Minute
@@ -341,12 +508,262 @@ func (s *Scheduler) executeCommandJob(ctx context.Context, job Job) {
 		SessionKey: target.Channel + ":" + target.ChatID,
 	}
 	msg = bus.MarkSystemOutboundMessage(msg)
-	if err := s.bus.PublishOutbound(ctx, msg); err != nil {
-		logger.ErrorCF("cron", "Failed to publish command job output", map[string]any{
-			"job":   job.Name,
-			"error": err.Error(),
-		})
+	if publishErr := s.bus.PublishOutbound(ctx, msg); publishErr != nil {
+		return publishErr
 	}
+	return err
+}
+
+func (s *Scheduler) notifyFailure(ctx context.Context, job Job, errText string) {
+	target := job.targetContext()
+	if target.Channel == "" || target.ChatID == "" {
+		return
+	}
+	msg := bus.MarkSystemOutboundMessage(bus.OutboundMessage{
+		Channel: target.Channel,
+		ChatID:  target.ChatID,
+		Context: target,
+		Content: fmt.Sprintf("Cron job %q failed: %s", job.Name, errText),
+	})
+	if err := s.bus.PublishOutbound(ctx, msg); err != nil {
+		logger.ErrorCF("cron", "Failed to publish cron failure notification", map[string]any{"job": job.Name, "error": err.Error()})
+	}
+}
+
+func (s *Scheduler) markInterruptedRuns() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	jobs, err := s.store.Load()
+	if err != nil {
+		logger.ErrorCF("cron", "Failed to load jobs on startup", map[string]any{"error": err.Error()})
+		return
+	}
+	now := time.Now().UTC()
+	changed := false
+	for i := range jobs {
+		if jobs[i].State.RunningAt == nil {
+			continue
+		}
+		jobs[i].State.LastRunAt = jobs[i].State.RunningAt
+		jobs[i].State.RunningAt = nil
+		jobs[i].State.LastStatus = StatusError
+		jobs[i].State.LastError = startupInterruptedError
+		jobs[i].State.ConsecutiveErrors++
+		changed = true
+	}
+	if s.recomputeNextRunsLocked(jobs, now, false) {
+		changed = true
+	}
+	if changed {
+		if err := s.store.Save(jobs); err != nil {
+			logger.ErrorCF("cron", "Failed to save startup cron state", map[string]any{"error": err.Error()})
+		}
+	}
+}
+
+func (s *Scheduler) runMissedJobs() {
+	ctx, ok := s.executionContext()
+	if !ok {
+		return
+	}
+	for i := 0; i < defaultStartupCatchupLimit; i++ {
+		job, ok, err := s.claimNextDueJob(time.Now())
+		if err != nil {
+			logger.ErrorCF("cron", "Failed startup catch-up claim", map[string]any{"error": err.Error()})
+			return
+		}
+		if !ok {
+			return
+		}
+		delay := time.Duration(i) * defaultStartupCatchupStagger
+		go func(job Job, delay time.Duration) {
+			timer := time.NewTimer(delay)
+			defer timer.Stop()
+			select {
+			case <-ctx.Done():
+				now := time.Now()
+				s.finishJob(job.Name, StatusError, ctx.Err().Error(), now, now)
+			case <-timer.C:
+				s.executeClaimedJob(ctx, job)
+			}
+		}(job, delay)
+	}
+}
+
+func (s *Scheduler) executionContext() (context.Context, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopped || s.ctx == nil {
+		return nil, false
+	}
+	return s.ctx, true
+}
+
+func (s *Scheduler) recomputeNextRunsLocked(jobs []Job, now time.Time, recomputeExisting bool) bool {
+	changed := false
+	for i := range jobs {
+		if !jobs[i].Enabled {
+			if jobs[i].State.NextRunAt != nil {
+				jobs[i].State.NextRunAt = nil
+				changed = true
+			}
+			continue
+		}
+		if jobs[i].CronExpr != "" && jobs[i].Timezone == "" {
+			jobs[i].Timezone = defaultTimezone
+			changed = true
+		}
+		if jobs[i].State.RunningAt != nil {
+			continue
+		}
+		if jobs[i].State.NextRunAt != nil && !recomputeExisting {
+			continue
+		}
+		next, err := s.computeNextRun(jobs[i], now)
+		if err != nil {
+			jobs[i].State.LastStatus = StatusError
+			jobs[i].State.LastError = "schedule error: " + err.Error()
+			jobs[i].State.ConsecutiveErrors++
+			jobs[i].State.NextRunAt = nil
+			changed = true
+			continue
+		}
+		if !sameTimePtr(jobs[i].State.NextRunAt, next) {
+			jobs[i].State.NextRunAt = next
+			changed = true
+		}
+	}
+	return changed
+}
+
+func (s *Scheduler) computeNextRun(job Job, now time.Time) (*time.Time, error) {
+	switch {
+	case job.AtSeconds != nil:
+		if job.State.LastStatus == StatusOK && job.State.LastRunAt != nil {
+			return nil, nil
+		}
+		runAt := job.CreatedAt.Add(time.Duration(*job.AtSeconds) * time.Second).UTC()
+		return &runAt, nil
+	case job.EverySeconds != nil:
+		every := time.Duration(*job.EverySeconds) * time.Second
+		if every <= 0 {
+			return nil, fmt.Errorf("every_seconds must be positive")
+		}
+		anchor := job.CreatedAt
+		if anchor.IsZero() {
+			anchor = now
+		}
+		if job.State.LastRunAt != nil {
+			next := job.State.LastRunAt.Add(every).UTC()
+			if next.After(now) {
+				return &next, nil
+			}
+		}
+		elapsed := now.Sub(anchor)
+		if elapsed < 0 {
+			next := anchor.UTC()
+			return &next, nil
+		}
+		steps := int64(math.Floor(float64(elapsed)/float64(every))) + 1
+		next := anchor.Add(time.Duration(steps) * every).UTC()
+		return &next, nil
+	case job.CronExpr != "":
+		loc, err := time.LoadLocation(resolveTimezone(job.Timezone))
+		if err != nil {
+			return nil, err
+		}
+		parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
+		schedule, err := parser.Parse(job.CronExpr)
+		if err != nil {
+			return nil, err
+		}
+		next := schedule.Next(now.In(loc)).UTC()
+		if next.IsZero() {
+			return nil, fmt.Errorf("no future run")
+		}
+		return &next, nil
+	default:
+		return nil, fmt.Errorf("missing schedule")
+	}
+}
+
+func (s *Scheduler) armTimerLocked(now time.Time) {
+	if s.stopped || !s.started {
+		return
+	}
+	jobs, err := s.store.Load()
+	if err != nil {
+		logger.ErrorCF("cron", "Failed to load jobs for timer", map[string]any{"error": err.Error()})
+		return
+	}
+	if s.recomputeNextRunsLocked(jobs, now, false) {
+		if err := s.store.Save(jobs); err != nil {
+			logger.ErrorCF("cron", "Failed to persist next runs", map[string]any{"error": err.Error()})
+			return
+		}
+	}
+	next := nextWake(jobs)
+	if s.timer != nil {
+		s.timer.Stop()
+		s.timer = nil
+	}
+	if next == nil {
+		return
+	}
+	delay := time.Until(*next)
+	if delay < 0 {
+		delay = 0
+	}
+	if delay > defaultSchedulerMaxTimerDelay {
+		delay = defaultSchedulerMaxTimerDelay
+	}
+	s.timer = time.AfterFunc(delay, s.tick)
+}
+
+func (s *Scheduler) defaultTimezone() string {
+	if s.cfg != nil && s.cfg.Tools.Cron.Timezone != "" {
+		return s.cfg.Tools.Cron.Timezone
+	}
+	return defaultTimezone
+}
+
+func resolveTimezone(tz string) string {
+	if tz == "" {
+		return defaultTimezone
+	}
+	return tz
+}
+
+func isDue(job Job, now time.Time, force bool) bool {
+	if force {
+		return job.Enabled
+	}
+	if !job.Enabled || job.State.NextRunAt == nil {
+		return false
+	}
+	return !job.State.NextRunAt.After(now)
+}
+
+func nextWake(jobs []Job) *time.Time {
+	var next *time.Time
+	for i := range jobs {
+		if !jobs[i].Enabled || jobs[i].State.RunningAt != nil || jobs[i].State.NextRunAt == nil {
+			continue
+		}
+		if next == nil || jobs[i].State.NextRunAt.Before(*next) {
+			t := *jobs[i].State.NextRunAt
+			next = &t
+		}
+	}
+	return next
+}
+
+func sameTimePtr(a, b *time.Time) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return a.Equal(*b)
 }
 
 func (j Job) targetContext() bus.InboundContext {

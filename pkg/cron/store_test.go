@@ -52,3 +52,16 @@ func TestStoreAtomicWrite(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, stat.IsDir())
 }
+
+func TestStoreLoadsLegacyArrayShape(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "jobs.json")
+	require.NoError(t, os.WriteFile(path, []byte(`[{"name":"legacy","message":"hello","enabled":true}]`), 0644))
+
+	store := NewStore(path)
+	jobs, err := store.Load()
+	require.NoError(t, err)
+	require.Len(t, jobs, 1)
+	require.Equal(t, "legacy", jobs[0].Name)
+	require.True(t, jobs[0].Enabled)
+}

@@ -60,7 +60,7 @@ Calm and concise.
 	assert.Contains(t, prompt, "Fallback identity content.")
 }
 
-func TestBuildSystemPromptIncludesMemoryEntryPoint(t *testing.T) {
+func TestBuildSystemPromptIgnoresMemoryEntryPoint(t *testing.T) {
 	workspace := t.TempDir()
 	writeWorkspaceFile(t, workspace, "AGENT.md", `You are the test agent.`)
 	writeWorkspaceFile(t, workspace, "IDENTITY.md", `Preferred identity content.`)
@@ -76,8 +76,10 @@ Remember to keep responses brief.
 	prompt, err := agent.NewContextBuilder(workspace).BuildSystemPromptWithCache()
 	require.NoError(t, err)
 
-	assert.Contains(t, prompt, "## Memory")
-	assert.Contains(t, prompt, "Remember to keep responses brief.")
+	assert.Contains(t, prompt, "`memory/MEMORY.md` may exist")
+	assert.Contains(t, prompt, "inspect it explicitly")
+	assert.NotContains(t, prompt, "## Memory")
+	assert.NotContains(t, prompt, "Remember to keep responses brief.")
 }
 
 func writeWorkspaceFile(t *testing.T, workspace, name, content string) {

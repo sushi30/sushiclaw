@@ -1,6 +1,8 @@
 package fs
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -195,7 +197,7 @@ func NewReadFileTool(workspace string, restrict bool, maxReadFileSize int64) *Re
 func (t *ReadFileTool) Name() string { return "read_file" }
 
 func (t *ReadFileTool) Description() string {
-	return "Read the contents of a file. Supports pagination via offset and length."
+	return "Read the contents of a file. Supports line ranges via start and end, or byte pagination via offset and length."
 }
 
 func (t *ReadFileTool) Parameters() map[string]interfaces.ParameterSpec {
@@ -215,6 +217,16 @@ func (t *ReadFileTool) Parameters() map[string]interfaces.ParameterSpec {
 			Description: "Maximum number of bytes to read.",
 			Required:    false,
 		},
+		"start": {
+			Type:        "integer",
+			Description: "First line to read, 1-based inclusive. Cannot be combined with offset or length.",
+			Required:    false,
+		},
+		"end": {
+			Type:        "integer",
+			Description: "Last line to read, 1-based inclusive. If omitted with start, reads to end of file.",
+			Required:    false,
+		},
 	}
 }
 
@@ -227,6 +239,8 @@ func (t *ReadFileTool) Execute(_ context.Context, args string) (string, error) {
 		Path   string `json:"path"`
 		Offset int64  `json:"offset"`
 		Length int64  `json:"length"`
+		Start  *int64 `json:"start"`
+		End    *int64 `json:"end"`
 	}
 	if err := json.Unmarshal([]byte(args), &req); err != nil {
 		return "", fmt.Errorf("invalid read_file arguments: %w", err)
@@ -236,6 +250,26 @@ func (t *ReadFileTool) Execute(_ context.Context, args string) (string, error) {
 	}
 	if req.Offset < 0 {
 		return "", fmt.Errorf("offset must be >= 0")
+	}
+	lineMode := req.Start != nil || req.End != nil
+	var start, end int64
+	if lineMode {
+		if req.Offset != 0 || req.Length != 0 {
+			return "", fmt.Errorf("line range cannot be combined with offset or length")
+		}
+		start = 1
+		if req.Start != nil {
+			start = *req.Start
+		}
+		if req.End != nil {
+			end = *req.End
+		}
+		if start < 1 {
+			return "", fmt.Errorf("start must be >= 1")
+		}
+		if req.End != nil && end < start {
+			return "", fmt.Errorf("end must be >= start")
+		}
 	}
 	if req.Length <= 0 || req.Length > t.maxSize {
 		req.Length = t.maxSize
@@ -253,6 +287,10 @@ func (t *ReadFileTool) Execute(_ context.Context, args string) (string, error) {
 	}
 	if info.IsDir() {
 		return "", fmt.Errorf("failed to open file: path is a directory: %s", req.Path)
+	}
+
+	if lineMode {
+		return t.readLineRange(file, req.Path, info.Size(), start, end)
 	}
 
 	if _, err = file.Seek(req.Offset, io.SeekStart); err != nil {
@@ -276,14 +314,70 @@ func (t *ReadFileTool) Execute(_ context.Context, args string) (string, error) {
 		return "[END OF FILE - no content at this offset]", nil
 	}
 
-	end := req.Offset + int64(len(data))
-	header := fmt.Sprintf("[file: %s | total: %d bytes | read: bytes %d-%d]", filepath.Base(req.Path), info.Size(), req.Offset, end-1)
+	byteEnd := req.Offset + int64(len(data))
+	header := fmt.Sprintf("[file: %s | total: %d bytes | read: bytes %d-%d]", filepath.Base(req.Path), info.Size(), req.Offset, byteEnd-1)
 	if hasMore {
-		header += fmt.Sprintf("\n[TRUNCATED - file has more content. Call read_file again with offset=%d to continue.]", end)
+		header += fmt.Sprintf("\n[TRUNCATED - file has more content. Call read_file again with offset=%d to continue.]", byteEnd)
 	} else {
 		header += "\n[END OF FILE - no further content.]"
 	}
 	return header + "\n\n" + string(data), nil
+}
+
+func (t *ReadFileTool) readLineRange(file *os.File, path string, totalBytes, start, end int64) (string, error) {
+	reader := bufio.NewReader(file)
+	var content bytes.Buffer
+	var currentLine int64
+	var lastReadLine int64
+	var hasMore bool
+	var hitByteLimit bool
+
+	for {
+		line, err := reader.ReadString('\n')
+		if len(line) > 0 {
+			currentLine++
+			inRange := currentLine >= start && (end == 0 || currentLine <= end)
+			if inRange {
+				if int64(content.Len()+len(line)) > t.maxSize {
+					remaining := int(t.maxSize) - content.Len()
+					if remaining > 0 {
+						content.WriteString(line[:remaining])
+						lastReadLine = currentLine
+					}
+					hitByteLimit = true
+					hasMore = true
+					break
+				}
+				content.WriteString(line)
+				lastReadLine = currentLine
+			}
+			if end > 0 && currentLine > end {
+				hasMore = true
+				break
+			}
+		}
+
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return "", fmt.Errorf("failed to read file content: %w", err)
+		}
+	}
+
+	if content.Len() == 0 {
+		return "[END OF FILE - no content at this line range]", nil
+	}
+
+	header := fmt.Sprintf("[file: %s | total: %d bytes | read: lines %d-%d]", filepath.Base(path), totalBytes, start, lastReadLine)
+	if hitByteLimit {
+		header += fmt.Sprintf("\n[TRUNCATED - selected line range exceeds max read size. Call read_file again with start=%d to continue.]", lastReadLine+1)
+	} else if hasMore {
+		header += fmt.Sprintf("\n[TRUNCATED - file has more content. Call read_file again with start=%d to continue.]", lastReadLine+1)
+	} else {
+		header += "\n[END OF FILE - no further content.]"
+	}
+	return header + "\n\n" + content.String(), nil
 }
 
 type WriteFileTool struct {

@@ -21,8 +21,16 @@ func WithDebugLogging(tool interfaces.Tool) interfaces.Tool {
 	return debugLoggingTool{tool: tool}
 }
 
-func withDebugLogging(tool interfaces.Tool) interfaces.Tool {
-	return WithDebugLogging(tool)
+// WithDebugLoggingForTools wraps every tool in a list with debug logging.
+func WithDebugLoggingForTools(tools []interfaces.Tool) []interfaces.Tool {
+	if len(tools) == 0 {
+		return tools
+	}
+	out := make([]interfaces.Tool, 0, len(tools))
+	for _, tool := range tools {
+		out = append(out, WithDebugLogging(tool))
+	}
+	return out
 }
 
 func (t debugLoggingTool) Name() string { return t.tool.Name() }

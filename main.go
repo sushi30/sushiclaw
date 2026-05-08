@@ -255,6 +255,8 @@ func newGatewayCommand() *cobra.Command {
 
 func newChatCommand() *cobra.Command {
 	var debug bool
+	var gatewayHost, gatewayToken, gatewaySession string
+	var gatewayPort int
 
 	cmd := &cobra.Command{
 		Use:     "chat",
@@ -272,6 +274,18 @@ func newChatCommand() *cobra.Command {
 			}
 			envresolve.Config(cfg)
 
+			if gatewayHost != "" {
+				opts, err := chatGatewayOptions(cfg, gatewayHost, gatewayPort, gatewayToken, gatewaySession)
+				if err != nil {
+					return err
+				}
+				runner, err := chat.NewGatewayClientRunner(opts)
+				if err != nil {
+					return err
+				}
+				return runner.Run(cmd.Context())
+			}
+
 			if cfg.Agents.Defaults.ModelName == "" {
 				return fmt.Errorf("no default model configured (set model_name in config)")
 			}
@@ -286,6 +300,37 @@ func newChatCommand() *cobra.Command {
 	}
 
 	cmd.Flags().BoolVarP(&debug, "debug", "d", false, "Enable debug logging")
+	cmd.Flags().StringVar(&gatewayHost, "gateway-host", "", "Connect to an existing gateway WebSocket host instead of starting a local chat runner")
+	cmd.Flags().IntVar(&gatewayPort, "gateway-port", 0, "Gateway WebSocket port for --gateway-host")
+	cmd.Flags().StringVar(&gatewayToken, "gateway-token", "", "Gateway WebSocket token for --gateway-host")
+	cmd.Flags().StringVar(&gatewaySession, "gateway-session", "cli", "Gateway WebSocket session ID for --gateway-host")
 
 	return cmd
+}
+
+func chatGatewayOptions(
+	cfg *config.Config,
+	host string,
+	port int,
+	token string,
+	sessionID string,
+) (chat.GatewayClientOptions, error) {
+	if ch := cfg.Channels[config.ChannelWebSocket]; ch != nil {
+		var wsCfg config.WebSocketSettings
+		if err := ch.Decode(&wsCfg); err != nil {
+			return chat.GatewayClientOptions{}, fmt.Errorf("decode websocket config: %w", err)
+		}
+		if port == 0 {
+			port = wsCfg.Port
+		}
+		if token == "" {
+			token = wsCfg.Token.String()
+		}
+	}
+	return chat.GatewayClientOptions{
+		Host:      host,
+		Port:      port,
+		Token:     token,
+		SessionID: sessionID,
+	}, nil
 }

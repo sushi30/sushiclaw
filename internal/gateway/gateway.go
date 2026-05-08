@@ -106,7 +106,7 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 			logger.WarnCF("gateway", "Failed to init web search tool",
 				map[string]any{"error": err.Error()})
 		} else {
-			tools = append(tools, sushitools.WithDebugLogging(wsTool))
+			tools = append(tools, wsTool)
 			logger.InfoCF("gateway", "Web search tool registered",
 				map[string]any{"provider": cfg.Tools.WebSearch.Provider})
 		}
@@ -122,7 +122,7 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error 
 		}
 	}
 	if cronScheduler != nil && cfg.Tools.IsToolEnabled("cron") {
-		tools = append(tools, sushitools.WithDebugLogging(cron.NewCronTool(cronScheduler, cfg)))
+		tools = append(tools, cron.NewCronTool(cronScheduler, cfg))
 		rt.ListCronJobs = func() (string, error) {
 			jobs, err := cronScheduler.ListJobs()
 			if err != nil {

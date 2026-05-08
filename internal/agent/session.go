@@ -23,6 +23,7 @@ import (
 	"github.com/sushi30/sushiclaw/pkg/llm/openrouter"
 	"github.com/sushi30/sushiclaw/pkg/logger"
 	"github.com/sushi30/sushiclaw/pkg/media"
+	sushitools "github.com/sushi30/sushiclaw/pkg/tools"
 	"github.com/sushi30/sushiclaw/pkg/tools/exec"
 	"github.com/sushi30/sushiclaw/pkg/tools/toolctx"
 )
@@ -124,11 +125,12 @@ func buildAgentWithMemory(cfg *config.Config, tools []interfaces.Tool, mem inter
 		})
 	}
 
+	loggedTools := sushitools.WithDebugLoggingForTools(tools)
 	opts := []agentsdk.Option{
 		agentsdk.WithName("sushiclaw"),
 		agentsdk.WithLLM(llmClient),
 		agentsdk.WithSystemPrompt(systemPrompt),
-		agentsdk.WithTools(tools...),
+		agentsdk.WithTools(loggedTools...),
 		agentsdk.WithMemory(mem),
 		agentsdk.WithRequirePlanApproval(false),
 	}

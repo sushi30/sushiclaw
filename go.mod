@@ -3,7 +3,7 @@ module github.com/sushi30/sushiclaw
 go 1.25.9
 
 require (
-	github.com/Ingenimax/agent-sdk-go v0.2.44
+	github.com/Ingenimax/agent-sdk-go v0.2.56
 	github.com/emersion/go-imap/v2 v2.0.0-beta.8
 	github.com/emersion/go-message v0.18.2
 	github.com/gomarkdown/markdown v0.0.0-20260412113850-134a5b2cce7f

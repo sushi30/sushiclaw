@@ -44,6 +44,99 @@ func TestReadFileTool_PaginatesByOffsetAndLength(t *testing.T) {
 	}
 }
 
+func TestReadFileTool_ReadsLineRange(t *testing.T) {
+	dir := t.TempDir()
+	requireWriteFile(t, filepath.Join(dir, "notes.txt"), "one\ntwo\nthree\nfour\n")
+
+	tool := NewReadFileTool(dir, true, 64)
+	out, err := tool.Execute(context.Background(), `{"path":"notes.txt","start":2,"end":3}`)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if !strings.Contains(out, "read: lines 2-3") {
+		t.Fatalf("output = %q, want line range header", out)
+	}
+	if !strings.Contains(out, "two\nthree\n") {
+		t.Fatalf("output = %q, want requested lines", out)
+	}
+	if strings.Contains(out, "one") || strings.Contains(out, "four") {
+		t.Fatalf("output = %q, want only requested line range", out)
+	}
+	if !strings.Contains(out, "TRUNCATED") {
+		t.Fatalf("output = %q, want truncation marker after selected range", out)
+	}
+}
+
+func TestReadFileTool_ReadsFromStartLineToEOF(t *testing.T) {
+	dir := t.TempDir()
+	requireWriteFile(t, filepath.Join(dir, "notes.txt"), "one\ntwo\nthree\n")
+
+	tool := NewReadFileTool(dir, true, 64)
+	out, err := tool.Execute(context.Background(), `{"path":"notes.txt","start":2}`)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if !strings.Contains(out, "read: lines 2-3") {
+		t.Fatalf("output = %q, want actual line range header", out)
+	}
+	if !strings.Contains(out, "two\nthree\n") {
+		t.Fatalf("output = %q, want content from start line to EOF", out)
+	}
+	if strings.Contains(out, "one") {
+		t.Fatalf("output = %q, want content before start omitted", out)
+	}
+	if !strings.Contains(out, "[END OF FILE") {
+		t.Fatalf("output = %q, want EOF marker", out)
+	}
+}
+
+func TestReadFileTool_RejectsInvalidLineRanges(t *testing.T) {
+	dir := t.TempDir()
+	requireWriteFile(t, filepath.Join(dir, "notes.txt"), "one\ntwo\n")
+
+	tests := []struct {
+		name string
+		args string
+		want string
+	}{
+		{
+			name: "start less than one",
+			args: `{"path":"notes.txt","start":0,"end":1}`,
+			want: "start must be >= 1",
+		},
+		{
+			name: "end before start",
+			args: `{"path":"notes.txt","start":2,"end":1}`,
+			want: "end must be >= start",
+		},
+		{
+			name: "zero end",
+			args: `{"path":"notes.txt","end":0}`,
+			want: "end must be >= start",
+		},
+		{
+			name: "mixed byte and line pagination",
+			args: `{"path":"notes.txt","start":1,"offset":1}`,
+			want: "line range cannot be combined with offset or length",
+		},
+	}
+
+	tool := NewReadFileTool(dir, true, 64)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := tool.Execute(context.Background(), tt.args)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestReadFileTool_BlocksWorkspaceEscape(t *testing.T) {
 	dir := t.TempDir()
 	outside := t.TempDir()
@@ -161,6 +254,9 @@ func TestToolsExposeExpectedMetadata(t *testing.T) {
 	}
 	if !read.Parameters()["path"].Required {
 		t.Fatal("read_file path should be required")
+	}
+	if read.Parameters()["start"].Required || read.Parameters()["end"].Required {
+		t.Fatal("read_file start and end should be optional")
 	}
 	if !write.Parameters()["path"].Required || !write.Parameters()["content"].Required {
 		t.Fatal("write_file path and content should be required")

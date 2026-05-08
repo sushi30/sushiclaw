@@ -189,6 +189,44 @@ func TestSessionManagerDebugTokenSummaryFromStreamMetadata(t *testing.T) {
 	assert.Equal(t, 10, usage.TotalTokens)
 }
 
+func TestSessionRunDetailedTurnUsesAgentSDKUsage(t *testing.T) {
+	var detailedCalls int
+	session := &Session{
+		agent: &scriptedRunner{
+			run: func(context.Context, string) (string, error) {
+				return "", errors.New("Run should not be called")
+			},
+			runDetailed: func(_ context.Context, input string) (*interfaces.AgentResponse, error) {
+				detailedCalls++
+				assert.Equal(t, "token check", input)
+				return &interfaces.AgentResponse{
+					Content: "ok",
+					Usage: &interfaces.TokenUsage{
+						InputTokens:  11,
+						OutputTokens: 7,
+						TotalTokens:  18,
+					},
+					ExecutionSummary: interfaces.ExecutionSummary{
+						LLMCalls:  1,
+						ToolCalls: 2,
+					},
+				}, nil
+			},
+		},
+	}
+
+	response, usage, toolCalls, err := session.runDetailedTurn(t.Context(), "token check")
+
+	require.NoError(t, err)
+	assert.Equal(t, "ok", response)
+	require.NotNil(t, usage)
+	assert.Equal(t, 11, usage.InputTokens)
+	assert.Equal(t, 7, usage.OutputTokens)
+	assert.Equal(t, 18, usage.TotalTokens)
+	assert.Equal(t, 2, toolCalls)
+	assert.Equal(t, 1, detailedCalls)
+}
+
 func TestSessionManagerDebugHeartbeatAfterSilence(t *testing.T) {
 	ch := make(chan interfaces.AgentStreamEvent, 2)
 	go func() {

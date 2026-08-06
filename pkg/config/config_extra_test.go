@@ -64,7 +64,7 @@ func TestFlexibleStringSlice_Array(t *testing.T) {
 }
 
 func TestChannel_Name(t *testing.T) {
-	cfg, err := config.LoadConfig("../../config.example.json")
+	cfg, err := config.LoadConfig("../../config.example.yaml")
 	require.NoError(t, err)
 
 	tgCh := cfg.Channels["telegram"]
@@ -131,7 +131,7 @@ func TestLoadConfig_MissingFile(t *testing.T) {
 
 func TestLoadConfig_ValidFile(t *testing.T) {
 	tmpDir := t.TempDir()
-	cfgPath := filepath.Join(tmpDir, "config.json")
+	cfgPath := filepath.Join(tmpDir, "config.yaml")
 	data := []byte(`{
 		"version": 2,
 		"agents": {"defaults": {"model_name": "test-model", "workspace": "/tmp", "restrict_to_workspace": false, "max_tokens": 1000, "temperature": 0.5, "max_tool_iterations": 5, "summary": {"enabled": true, "token_trigger": 32000, "model": "summary-model"}}},
@@ -152,6 +152,34 @@ func TestLoadConfig_ValidFile(t *testing.T) {
 	assert.Equal(t, "summary-model", cfg.Agents.Defaults.Summary.Model)
 	assert.Equal(t, 8080, cfg.Gateway.Port)
 	assert.NotNil(t, cfg.Channels["telegram"])
+	assert.Equal(t, "telegram", cfg.Channels["telegram"].Name())
+}
+
+func TestLoadConfig_JSONRejected(t *testing.T) {
+	_, err := config.LoadConfig("../../config.example.json")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported JSON format")
+}
+
+func TestMigrateJSONConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	sourcePath := filepath.Join(tmpDir, "config.json")
+	destPath := filepath.Join(tmpDir, "config.yaml")
+
+	data, err := os.ReadFile("../../config.example.json")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(sourcePath, data, 0o600))
+
+	require.NoError(t, config.MigrateJSONConfig(sourcePath, destPath, false))
+
+	backupPath := sourcePath + ".bak"
+	backupData, err := os.ReadFile(backupPath)
+	require.NoError(t, err)
+	assert.Equal(t, data, backupData)
+
+	cfg, err := config.LoadConfig(destPath)
+	require.NoError(t, err)
+	assert.Equal(t, "gpt-4o-mini", cfg.Agents.Defaults.ModelName)
 	assert.Equal(t, "telegram", cfg.Channels["telegram"].Name())
 }
 

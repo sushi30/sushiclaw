@@ -1,11 +1,16 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // Channel type constants.
@@ -55,13 +60,16 @@ type AgentsConfig struct {
 }
 
 type AgentDefaults struct {
-	ModelName           string        `json:"model_name"`
-	Workspace           string        `json:"workspace"`
-	RestrictToWorkspace bool          `json:"restrict_to_workspace"`
-	MaxTokens           int           `json:"max_tokens"`
-	Temperature         float64       `json:"temperature"`
-	MaxToolIterations   int           `json:"max_tool_iterations"`
-	Summary             SummaryConfig `json:"summary,omitempty"`
+	ModelName                 string        `json:"model_name"`
+	Workspace                 string        `json:"workspace"`
+	RestrictToWorkspace       bool          `json:"restrict_to_workspace"`
+	MaxTokens                 int           `json:"max_tokens"`
+	ContextWindow             int           `json:"context_window,omitempty"`
+	Temperature               float64       `json:"temperature"`
+	MaxToolIterations         int           `json:"max_tool_iterations"`
+	SummarizeMessageThreshold int           `json:"summarize_message_threshold,omitempty"`
+	SummarizeTokenPercent     int           `json:"summarize_token_percent,omitempty"`
+	Summary                   SummaryConfig `json:"summary,omitempty"`
 }
 
 type SummaryConfig struct {
@@ -365,20 +373,69 @@ func (b *Channel) Decode(target any) error {
 
 // UnmarshalJSON stores raw bytes and unmarshals common fields.
 func (b *Channel) UnmarshalJSON(data []byte) error {
-	b.raw = data
+	b.raw = append(b.raw[:0], data...)
 	type Alias Channel
 	return json.Unmarshal(data, (*Alias)(b))
 }
 
 // LoadConfig loads sushiclaw config from path.
 func LoadConfig(path string) (*Config, error) {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".json":
+		return nil, fmt.Errorf("config %q uses unsupported JSON format; run `sushiclaw migrate-config` to convert it to YAML", path)
+	case ".yaml", ".yml", "":
+		return loadYAMLConfig(path)
+	default:
+		return loadYAMLConfig(path)
+	}
+}
+
+// LoadJSONConfig loads a legacy JSON config for migration purposes.
+func LoadJSONConfig(path string) (*Config, error) {
+	return loadJSONConfig(path)
+}
+
+func loadYAMLConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
+	var raw any
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("parse config %q as YAML: %w", path, err)
+	}
+	return decodeConfigFromAny(raw, path)
+}
+
+func loadJSONConfig(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read config: %w", err)
+	}
+	return decodeConfigJSON(data, path)
+}
+
+func decodeConfigFromAny(raw any, source string) (*Config, error) {
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return nil, fmt.Errorf("normalize config %q: %w", source, err)
+	}
+	return decodeConfigJSON(data, source)
+}
+
+func decodeConfigJSON(data []byte, source string) (*Config, error) {
 	var cfg Config
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parse config: %w", err)
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&cfg); err != nil {
+		return nil, fmt.Errorf("parse config %q: %w", source, err)
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("parse config %q: unexpected trailing data", source)
+		}
+		return nil, fmt.Errorf("parse config %q: %w", source, err)
 	}
 	for name, ch := range cfg.Channels {
 		if ch == nil {

@@ -12,7 +12,7 @@ and no email channel will be started. Move the settings to `channels.email`.
 
 ### Required Config Migration
 
-Open `~/.picoclaw/config.json` or `$SUSHICLAW_CONFIG` and move the email block
+Open `~/.picoclaw/config.yaml` or `$SUSHICLAW_CONFIG` and move the email block
 from the top-level `email_channel` key into the `channels` map.
 
 **Before:**

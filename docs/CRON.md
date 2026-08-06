@@ -10,7 +10,7 @@ architecture and state-flow diagrams.
 
 ## Enable The Tool
 
-Enable cron in `config.json`:
+Enable cron in `config.yaml`:
 
 ```json
 {

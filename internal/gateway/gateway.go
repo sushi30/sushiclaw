@@ -339,5 +339,5 @@ func GetConfigPath() string {
 	if p := os.Getenv("SUSHICLAW_CONFIG"); p != "" {
 		return p
 	}
-	return filepath.Join(GetHome(), "config.json")
+	return filepath.Join(GetHome(), "config.yaml")
 }

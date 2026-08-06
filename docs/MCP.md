@@ -4,11 +4,11 @@ Sushiclaw can connect to [Model Context Protocol (MCP)](https://modelcontextprot
 
 ## Overview
 
-MCP configuration lives in your `config.json` under the `mcp` key. When the agent starts, it reads `mcpServers`, connects to each server, and makes the server's tools available to the agent automatically.
+MCP configuration lives in your `config.yaml` under the `mcp` key. When the agent starts, it reads `mcpServers`, connects to each server, and makes the server's tools available to the agent automatically.
 
 ## Quick Start
 
-Add an `mcp` section to `~/.picoclaw/config.json`:
+Add an `mcp` section to `~/.picoclaw/config.yaml`:
 
 ```json
 {

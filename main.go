@@ -42,6 +42,7 @@ func newRootCommand() *cobra.Command {
 	cmd.AddCommand(newVersionCommand())
 	cmd.AddCommand(newChatCommand())
 	cmd.AddCommand(newCronCommand())
+	cmd.AddCommand(newMigrateConfigCommand())
 	return cmd
 }
 

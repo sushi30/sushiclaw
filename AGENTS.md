@@ -140,7 +140,7 @@ CGO_ENABLED=0 go build -tags whatsapp_native -o sushiclaw .
 | Variable | Purpose | Default |
 |----------|---------|---------|
 | `SUSHICLAW_HOME` | Home directory for configs, workspace, logs | `$PICOCLAW_HOME` → `~/.picoclaw` |
-| `SUSHICLAW_CONFIG` | Path to `config.json` | `$SUSHICLAW_HOME/config.json` |
+| `SUSHICLAW_CONFIG` | Path to `config.yaml` | `$SUSHICLAW_HOME/config.yaml` |
 | `SUSHICLAW_EXEC_ALLOWED_SENDERS` | Comma-separated chat IDs that can use the `exec` tool remotely (bypasses `allowRemote=false`) | *(unset = no trusted senders)* |
 
 ## CLI commands
@@ -169,10 +169,10 @@ CGO_ENABLED=0 go build -tags whatsapp_native -o sushiclaw .
 Config is JSON. Load order:
 
 1. `$SUSHICLAW_CONFIG` if set
-2. `$SUSHICLAW_HOME/config.json`
-3. `~/.picoclaw/config.json`
+2. `$SUSHICLAW_HOME/config.yaml`
+3. `~/.picoclaw/config.yaml`
 
-Copy `config.example.json` to get started.
+Copy `config.example.yaml` to get started.
 
 ### `env://` resolution
 
